@@ -1,0 +1,429 @@
+---
+title: "Projet Fierthé"
+author: "KOUASSI KONAN LEGER"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Objectif : Formuler des propositions claires pour la valorisation durable du thé en France
+
+
+## Phase 1 – Prise en main et cadrage
+## Objectifs
+
+- Comprendre le contexte du projet et les enjeux de la filière théicole durable  
+- Se familiariser avec la base de données **MINTEL GNPD** et les outils
+
+## Tâches
+
+- Lecture du projet Fierthé, documents internes et publications liées  
+- Prise en main de la base **MINTEL** (structure, variables, type de données)  
+- Rencontre avec le tuteur
+
+## Analyses univariées
+```{r}
+# Importation des packages nécessaires
+library(tidyverse)    # Inclut dplyr, tidyr, ggplot2, stringr
+library(readxl)
+library(lubridate)
+library(wordcloud)
+library(tidytext)
+library(scales)
+library(tm)
+library(forcats)
+
+# Nettoyage de l'environnement
+rm(list = ls())
+
+# Importation des données
+gnpd_brut <- read_excel("GNPD_tea.xlsx")
+
+# Analyse globale de la base de données
+glimpse(gnpd_brut)
+
+# Conversion des variables en format approprié
+gnpd_brut <- gnpd_brut %>%
+  mutate(
+    `Price per 100 g/ml in Euros` = as.numeric(`Price per 100 g/ml in Euros`),
+    `Price in US Dollars` = as.numeric(`Price in US Dollars`),
+    `Price in Euros` = as.numeric(`Price in Euros`),
+    `Unit Pack Size (ml/g)` = as.numeric(`Unit Pack Size (ml/g)`),
+    `Alcohol By Volume (%)` = as.numeric(`Alcohol By Volume (%)`),
+    `Date Published` = as.Date(`Date Published`)  
+  )
+
+# Élimination des variables non pertinentes
+gnpd <- gnpd_brut %>% 
+  select(-c(`Record ID`,`Record hyperlink`,`Bar Code`,`Alcohol By Volume (%)`,
+            `Allergens / Warnings`))
+
+# Transformation des colonnes
+gnpd <- gnpd %>%
+  mutate(
+    price_per_100 = as.numeric(`Price per 100 g/ml in Euros`),
+    year = year(`Date Published`),
+    month = floor_date(`Date Published`, "month")
+  )
+
+# Filtrage des données aberrantes
+total_lignes <- nrow(gnpd)
+
+gnpd_filtre <- gnpd %>%
+  filter(`Unit Pack Size (ml/g)` >= 2,
+         `Unit Pack Size (ml/g)` <= 5000)
+
+proportion_conservee <- nrow(gnpd_filtre) / total_lignes
+
+# Affichage de la proportion conservée
+proportion_conservee
+
+gnpd <- gnpd_filtre
+```
+
+
+```{r}
+# Sous-categorie
+gnpd %>%
+  count(`Sub-Category`, sort = TRUE) %>%
+  slice_max(n, n = 10) %>%
+  ggplot(aes(x = reorder(`Sub-Category`, n), y = n)) +
+  geom_col(fill = "tomato") +
+  coord_flip() +
+  labs(title = "Top 10 des sous-catégories",
+       x = "Sous-catégorie",
+       y = "Nombre de produits")
+```
+## Analyse de la variable "Positioning Claims"
+Je l'hypothese selon laquelle cette variable est suceptible d'influencer non seulement le prix mais aussi le choix des consommateurs.
+
+```{r}
+# Extraction des claims individuels
+claims <- gnpd %>%
+  filter(!is.na(`Positioning Claims`)) %>%
+  unnest_tokens(claim, `Positioning Claims`, token = "regex",
+                pattern = ",\\s*") %>%
+  count(claim, sort = TRUE)
+
+# Barplot des claims les plus fréquents
+claims %>%
+  slice_max(n, n = 15) %>%
+  ggplot(aes(x = reorder(claim, n), y = n)) +
+  geom_col(fill = "purple") +
+  coord_flip() +
+  labs(title = "Principaux arguments marketing", x = "Claim", y = "Fréquence")
+
+```
+Nous pouvons contacter sur ce graphique les effets dominents des differents produits. Essayons de projetter les mots dominents de issu de cette variable qui peut etre par la suite peut nous aider à avoir certaines combinansons qui peuvent aider à avoir un titre de produit de haute qualité.
+
+# Nuage de mot de la variable "Positioning claims"
+Je me suis basé sur les exemple de ce lien : 
+https://www.sthda.com/french/wiki/text-mining-et-nuage-de-mots-avec-le-logiciel-r-5-etapes-simples-a-savoir
+```{r}
+library(tm)
+set.seed(123)
+text_corpus <- Corpus(VectorSource(gnpd$`Positioning Claims`))
+toSpace <- content_transformer(function (x , pattern ) gsub(pattern, " ", x))
+
+text_corpus <- tm_map(text_corpus, toSpace, "/")
+text_corpus <- tm_map(text_corpus, toSpace, "-")
+
+text_corpus <- tm_map(text_corpus, content_transformer(tolower))
+text_corpus <- tm_map(text_corpus, removePunctuation)
+text_corpus <- tm_map(text_corpus,
+                      function(x)removeWords(x,stopwords(kind = "english")))
+
+wordcloud(text_corpus, colors = brewer.pal(8, "Dark2"),
+          rot.per=0, random.order = F)
+
+dtm <- TermDocumentMatrix(text_corpus)
+m <- as.matrix(dtm)
+v <- sort(rowSums(m),decreasing=TRUE)
+d <- data.frame(word = names(v),freq=v)
+head(d, 10)
+
+```
+
+
+## Analyse des types d'embalage
+
+```{r}
+gnpd %>%
+  filter(!is.na(`Package Type`)) %>% 
+  count(`Package Type`, sort = TRUE,) %>%
+  #slice_max(n, n = 10) %>%
+  ggplot(aes(x = reorder(`Package Type`, n), y = n)) +
+  geom_col(fill = "darkred") +
+  coord_flip() +
+  labs(title = "Types d'emballage", x = "Type d'emballage", y = "Nombre de produits")
+
+gnpd %>%
+  filter(!is.na(`Package Material`)) %>% 
+  count(`Package Material`, sort = TRUE,) %>%
+  slice_max(n, n = 20) %>%
+  ggplot(aes(x = reorder(`Package Material`, n), y = n)) +
+  geom_col(fill = "darkred") +
+  coord_flip() +
+  labs(title = "Top 10 des materiels d'emballage", x = "Materiel d'emballage", y = "Nombre de produits")
+
+```
+
+## Analyse du prix
+```{r}
+summary(gnpd$`Price per 100 g/ml in Euros`)
+```
+Etant donné qu'il semble avoir des variables aberrantes,nous allons, dans un premier temps, les 1% de valeurs extremes
+
+
+```{r}
+gnpd_clean <- gnpd %>%
+  filter(!is.na(price_per_100),
+         price_per_100 < quantile(price_per_100, 0.99, na.rm = T))  
+         # on retire le top 1%
+
+# visualisation
+ggplot(gnpd_clean, aes(x = price_per_100)) +
+  geom_histogram(fill = "#2a9d8f", color = "white") +
+  labs(title = "Distribution du prix (€/100g ou ml)", x = "Prix", y = "Fréquence")
+
+```
+
+
+# Analyses Bivariées
+
+## Analyse prix et Positioning claims
+
+```{r}
+# Étape 1 : Extraire tous les claims dans des lignes séparées
+gnpd_long <- gnpd_clean %>%
+  filter(!is.na(`Positioning Claims`)) %>%
+  separate_rows(`Positioning Claims`, sep = ",\\s*")  # sépare les claims par virgule
+
+# Étape 2 : Identifier les 10 claims les plus fréquents
+top_claims <- gnpd_long %>%
+  count(`Positioning Claims`, sort = TRUE) %>%
+  slice_head(n = 20) %>%
+  pull(`Positioning Claims`)
+
+# Étape 3 : Filtrer uniquement les produits contenant ces claims
+gnpd_top_claims <- gnpd_long %>%
+  filter(`Positioning Claims` %in% top_claims)
+
+# Étape 4 : Tracer le boxplot
+ggplot(gnpd_top_claims, aes(x = fct_reorder(`Positioning Claims`,
+                                            price_per_100, .fun = median), y = price_per_100)) +
+  geom_boxplot(fill = "#f4a261") +
+  labs(
+    title = "Prix selon les 20 Positioning Claims les plus fréquents",
+    x = "Positioning Claim",
+    y = "Prix pour 100g/ml"
+  ) +
+  coord_flip() +  # pivote pour une lecture plus facile
+  theme_minimal()
+```
+## Prix vs Embalage
+
+```{r}
+ggplot(gnpd_clean %>% 
+         filter(!is.na(`Package Type`)), aes(x = fct_lump(`Package Type`, 10), y = price_per_100)) +
+  geom_boxplot(fill = "#f4a261") +
+  labs(title = "Prix selon le type d'emballage", x = "Type d'emballage", y = "Prix pour 100g/ml") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(gnpd_clean %>% 
+         filter(!is.na(`Package Material`)), aes(x = fct_lump(`Package Material`, 10), y = price_per_100)) +
+  geom_boxplot(fill = "#f4a261") +
+  labs(title = "Prix selon le materiel d'emballage utilisé", x = "Materiel d'emballage", y = "Prix pour 100g/ml") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Evolution du prix en fonction des sous categories "Tea" et "RTD Tea"
+
+```{r}
+# Filtrage des deux sous-catégories de thé
+tea_data <- gnpd %>%
+  filter(
+    `Sub-Category` %in% c("Tea"),
+    !is.na(price_per_100),
+    !is.na(month)
+  )
+
+# Calcul du prix moyen par mois et sous-catégorie
+evol_prix_tea <- tea_data %>%
+  group_by(month, `Sub-Category`) %>%
+  summarise(mean_price = mean(price_per_100, na.rm = TRUE), .groups = "drop")
+
+# Visualisation
+ggplot(evol_prix_tea, aes(x = month, y = mean_price, color = `Sub-Category`)) +
+  geom_line(size = 1.2) +
+  labs(
+    title = "Évolution mensuelle du prix moyen des sous-catégories de thé",
+    x = "Date (mois)",
+    y = "Prix moyen (€/100g ou ml)",
+    color = "Sous-catégorie"
+  ) +
+  theme_minimal()
+
+```
+```{r}
+# Filtrage des deux sous-catégories de thé
+tea_data <- gnpd %>%
+  filter(
+    `Sub-Category` %in% c("RTD (Iced) Tea"),
+    !is.na(price_per_100),
+    !is.na(month)
+  )
+
+# Calcul du prix moyen par mois et sous-catégorie
+evol_prix_tea <- tea_data %>%
+  group_by(month, `Sub-Category`) %>%
+  summarise(mean_price = mean(price_per_100, na.rm = TRUE), .groups = "drop")
+
+# Visualisation
+ggplot(evol_prix_tea, aes(x = month, y = mean_price, color = `Sub-Category`)) +
+  geom_line(size = 1.2) +
+  labs(
+    title = "Évolution mensuelle du prix moyen des sous-catégories de thé",
+    x = "Date (mois)",
+    y = "Prix moyen (€/100g ou ml)",
+    color = "Sous-catégorie"
+  ) +
+  scale_color_brewer(palette = "Set2")+
+  theme_minimal()
+
+```
+
+## Tests statistiques sur l'influence des emballages
+
+```{r}
+# Test ANOVA pour le type d'emballage
+# On ne garde que les types d'emballage avec suffisamment d'observations
+emballage_type <- gnpd_clean %>%
+  group_by(`Package Type`) %>%
+  filter(n() >= 10) %>%  # Au moins 10 observations par type
+  ungroup()
+
+# Test ANOVA
+anova_type <- aov(price_per_100 ~ `Package Type`, data = emballage_type)
+summary_anova_type <- summary(anova_type)
+
+# Test ANOVA pour le matériel d'emballage
+emballage_materiel <- gnpd_clean %>%
+  group_by(`Package Material`) %>%
+  filter(n() >= 10) %>%  # Au moins 10 observations par matériel
+  ungroup()
+
+# Test ANOVA
+anova_materiel <- aov(price_per_100 ~ `Package Material`, data = emballage_materiel)
+summary_anova_materiel <- summary(anova_materiel)
+
+# Calcul des moyennes et écarts-types par catégorie
+moyennes_type <- emballage_type %>%
+  group_by(`Package Type`) %>%
+  summarise(
+    prix_moyen = mean(price_per_100, na.rm = TRUE),
+    ecart_type = sd(price_per_100, na.rm = TRUE),
+    n = n()
+  ) %>%
+  arrange(desc(prix_moyen))
+
+moyennes_materiel <- emballage_materiel %>%
+  group_by(`Package Material`) %>%
+  summarise(
+    prix_moyen = mean(price_per_100, na.rm = TRUE),
+    ecart_type = sd(price_per_100, na.rm = TRUE),
+    n = n()
+  ) %>%
+  arrange(desc(prix_moyen))
+
+# Visualisation des moyennes avec intervalles de confiance
+ggplot(moyennes_type, aes(x = reorder(`Package Type`, prix_moyen), y = prix_moyen)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  geom_errorbar(aes(ymin = prix_moyen - 1.96 * (ecart_type/sqrt(n)), 
+                    ymax = prix_moyen + 1.96 * (ecart_type/sqrt(n))), 
+                width = 0.2) +
+  coord_flip() +
+  labs(
+    title = "Prix moyen par type d'emballage",
+    subtitle = "Barres d'erreur : intervalle de confiance à 95%",
+    x = "Type d'emballage",
+    y = "Prix moyen (€/100g ou ml)"
+  ) +
+  theme_minimal()
+
+ggplot(moyennes_materiel, aes(x = reorder(`Package Material`, prix_moyen), y = prix_moyen)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  geom_errorbar(aes(ymin = prix_moyen - 1.96 * (ecart_type/sqrt(n)), 
+                    ymax = prix_moyen + 1.96 * (ecart_type/sqrt(n))), 
+                width = 0.2) +
+  coord_flip() +
+  labs(
+    title = "Prix moyen par matériel d'emballage",
+    subtitle = "Barres d'erreur : intervalle de confiance à 95%",
+    x = "Matériel d'emballage",
+    y = "Prix moyen (€/100g ou ml)"
+  ) +
+  theme_minimal()
+```
+
+### Interprétation des résultats
+
+```{r}
+# Affichage des résultats de l'ANOVA
+cat("Résultats de l'ANOVA pour le type d'emballage :\n")
+print(summary_anova_type)
+
+cat("\nRésultats de l'ANOVA pour le matériel d'emballage :\n")
+print(summary_anova_materiel)
+
+# Affichage des moyennes avec les différences significatives
+cat("\nMoyennes des prix par type d'emballage :\n")
+print(moyennes_type)
+
+cat("\nMoyennes des prix par matériel d'emballage :\n")
+print(moyennes_materiel)
+
+# Calcul des différences relatives
+cat("\nDifférences relatives entre les types d'emballage (en %) :\n")
+diff_type <- moyennes_type %>%
+  mutate(
+    diff_rel = (prix_moyen - min(prix_moyen)) / min(prix_moyen) * 100
+  ) %>%
+  select(`Package Type`, diff_rel) %>%
+  arrange(desc(diff_rel))
+
+print(diff_type)
+
+cat("\nDifférences relatives entre les matériaux d'emballage (en %) :\n")
+diff_materiel <- moyennes_materiel %>%
+  mutate(
+    diff_rel = (prix_moyen - min(prix_moyen)) / min(prix_moyen) * 100
+  ) %>%
+  select(`Package Material`, diff_rel) %>%
+  arrange(desc(diff_rel))
+
+print(diff_materiel)
+```
+
+Ces analyses nous permettent de :
+1. Vérifier si les différences de prix entre les types d'emballage sont statistiquement significatives (ANOVA)
+2. Quantifier l'ampleur des différences de prix entre les catégories
+3. Visualiser les moyennes avec leurs intervalles de confiance
+4. Calculer les différences relatives pour mieux comprendre l'impact sur le prix
+
+## Conclusion
+
+Cette analyse nous a permis d'explorer en profondeur la base de données MINTEL GNPD concernant les produits de thé. Nous avons pu identifier :
+
+1. Les tendances principales dans les sous-catégories de produits
+2. L'importance des claims marketing et leur impact sur les prix
+3. Les préférences en matière d'emballage
+4. L'évolution des prix dans le temps
+5. L'influence des claims nutritionnels sur la valorisation des produits
+
+Ces insights pourront servir de base pour formuler des recommandations stratégiques pour la valorisation durable du thé en France.

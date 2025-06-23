@@ -1,0 +1,582 @@
+---
+title: "Analyse Bivariée : Prix vs Marché des Produits de Thé (Catégorie Tea)"
+author: "KOUASSI KONAN LEGER"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: united
+    highlight: tango
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Analyse du Tea brut
+
+## 1. Chargement des Données et Packages
+
+```{r packages}
+# Chargement des packages nécessaires
+library(readxl)
+library(tidyverse)
+library(dplyr)
+library(lubridate)
+library(wordcloud)
+library(tidytext)
+library(scales)
+library(car) # Pour les tests statistiques
+library(rstatix) # Pour les tests statistiques
+library(ggpubr) # Pour les visualisations statistiques
+
+# Nettoyage de l'environnement
+rm(list = ls())
+
+# Importation des données
+gnpd <- read_excel("GNPD_tea.xlsx")
+
+# Préparation des données
+gnpd <- gnpd %>%
+  mutate(
+    `Price per 100 g/ml in Euros` = as.numeric(`Price per 100 g/ml in Euros`),
+    `Price in US Dollars` = as.numeric(`Price in US Dollars`),
+    `Price in Euros` = as.numeric(`Price in Euros`),
+    `Unit Pack Size (ml/g)` = as.numeric(`Unit Pack Size (ml/g)`),
+    `Alcohol By Volume (%)` = as.numeric(`Alcohol By Volume (%)`),
+    `Bar Code` = as.character(`Bar Code`),
+    `Date Published` = as.Date(`Date Published`)  
+  )
+
+# Filtrage pour ne garder que la catégorie Tea
+gnpd_tea <- gnpd %>%
+  filter(`Sub-Category` == "Tea",
+         Market %in% c("China","Taiwan, China","Hong Kong, China")) %>%
+  filter(!is.na(`Price per 100 g/ml in Euros`))
+
+# Filtrage des valeurs aberrantes
+gnpd_french_market_tea <- gnpd_tea %>%
+  filter(`Unit Pack Size (ml/g)` >= 2.00,
+         `Unit Pack Size (ml/g)` <= 5000.00,
+         `Price per 100 g/ml in Euros` != 0.00)
+
+# Calcul de la proportion conservée
+total_lignes <- nrow(gnpd_tea)
+proportion_conservee <- nrow(gnpd_french_market_tea) / total_lignes
+cat("Proportion des données conservées :", round(proportion_conservee * 100, 2), "%\n")
+```
+
+## 2. Analyse du thé du marché chinois
+
+### 2.1 Résumé Statistique des Variables
+
+```{r summary}
+# Résumé statistique du prix
+summary_prix <- summary(gnpd_french_market_tea$`Price per 100 g/ml in Euros`)
+print("Résumé statistique du prix :")
+print(summary_prix)
+
+# Test de normalité de Shapiro-Wilk
+shapiro_test <- shapiro.test(gnpd_french_market_tea$`Price per 100 g/ml in Euros`)
+print("Test de normalité de Shapiro-Wilk :")
+print(shapiro_test)
+```
+
+### 2.2 Analyse des Bornes de Tukey
+
+```{r tukey_analysis}
+# Calcul des bornes de Tukey
+prix <- gnpd_french_market_tea$`Price per 100 g/ml in Euros`
+prix <- na.omit(prix)
+Q1 <- quantile(prix, 0.25)
+Q3 <- quantile(prix, 0.75)
+IQR <- Q3 - Q1
+borne_inf <- Q1 - 1.5 * IQR
+borne_sup <- Q3 + 1.5 * IQR
+
+# Affichage des bornes pour info
+cat("Limites de Tukey : [", round(borne_inf, 2), ";", round(borne_sup, 2), "]\n")
+
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(gnpd_french_market_tea %>% 
+         filter(!is.na(`Price per 100 g/ml in Euros`),
+                `Price per 100 g/ml in Euros`<=borne_sup),
+       aes(x = `Price per 100 g/ml in Euros`)) +
+  geom_histogram(binwidth = 1, fill = "skyblue", color = "black") +
+  labs(title = "Distribution du prix par 100 g/ml (France)",
+       x = "Prix (€ / 100 g/ml)", y = "Fréquence",
+       caption = "Source : Base Mintel") +
+  theme_minimal()
+
+```
+
+```{r}
+ggplot(gnpd_french_market_tea%>% 
+         filter(!is.na(`Price per 100 g/ml in Euros`),
+                `Price per 100 g/ml in Euros`<=borne_sup), aes(y = `Price per 100 g/ml in Euros`)) +
+  geom_boxplot(fill = "orange", color = "black") +
+  labs(title = "Boxplot du prix par 100 g/ml (France)",
+       y = "Prix (€ / 100 g/ml)",
+       caption = "Source : Base Mintel") +
+  theme_minimal()
+
+```
+
+```{r}
+ggplot(gnpd_french_market_tea, aes(x = log1p(`Price per 100 g/ml in Euros`))) +
+  geom_histogram(binwidth = 0.2, fill = "tomato", color = "black") +
+  labs(title = "Distribution du log(prix)", x = "log(1 + Prix)", y = "Fréquence",
+       caption = "Source : Base Mintel") +
+  theme_minimal()
+
+```
+
+### Evolution du prix du thé chinois au cours temps
+
+```{r}
+library(lubridate)
+library(dplyr)
+
+# Créer une colonne "mois"
+gnpd_french_market_tea <- gnpd_french_market_tea %>%
+  mutate(Mois = floor_date(as.Date(`Date Published`), unit = "month"))
+
+# Creation de la variable mois
+prix_par_mois <- gnpd_french_market_tea %>%
+  filter(!is.na(`Price per 100 g/ml in Euros`)) %>%
+  group_by(Mois) %>%
+  summarise(Prix_moyen = mean(`Price per 100 g/ml in Euros`))
+
+# Calcul du prix moyen par mois
+prix_par_mois <- gnpd_french_market_tea %>%
+  filter(!is.na(`Price per 100 g/ml in Euros`)) %>%
+  group_by(Mois) %>%
+  summarise(Prix_moyen = mean(`Price per 100 g/ml in Euros`))
+
+# Representation graphique
+library(ggplot2)
+
+ggplot(prix_par_mois, aes(x = Mois, y = Prix_moyen)) +
+  geom_line(color = "blue", size = 1) +
+  geom_point(color = "darkblue", size = 1.5) +
+  labs(title = "Évolution du prix moyen du thé en Chine par mois",
+       x = "Mois",
+       y = "Prix moyen (€ / 100 g/ml)",
+       caption = "Source : Base Mintel") +
+  theme_minimal()
+
+
+# AUtre option
+ggplot(prix_par_mois, aes(x = Mois, y = Prix_moyen)) +
+  geom_line(color = "steelblue") +
+  geom_smooth(method = "loess", color = "red", se = FALSE) +
+  labs(title = "Tendance du prix du thé en Chine",
+       x = "Mois", y = "Prix moyen (€)",
+       caption = "Source : Base Mintel") +
+  theme_minimal()
+
+
+```
+
+### par année
+
+```{r}
+# Calcul des prix moyens par année
+```
+
+```{r}
+prix_par_annee <- gnpd_french_market_tea %>%
+  mutate(annee = lubridate::year(`Date Published`)) %>%
+  filter(!is.na(`Price per 100 g/ml in Euros`),
+         !is.na(annee)) %>%
+  group_by(annee) %>%
+  summarise(
+    n = n(),
+    prix_moyen = mean(`Price per 100 g/ml in Euros`, na.rm = TRUE),
+    prix_median = median(`Price per 100 g/ml in Euros`, na.rm = TRUE),
+    prix_min = min(`Price per 100 g/ml in Euros`, na.rm = TRUE),
+    prix_max = max(`Price per 100 g/ml in Euros`, na.rm = TRUE)
+  ) %>%
+  arrange(annee)
+```
+
+```{r}
+# Graphique de l'évolution des prix moyens
+ggplot(prix_par_annee, aes(x = annee, y = prix_moyen)) +
+  geom_line(color = "darkblue", size = 1) +
+  geom_point(color = "darkblue", size = 2) +
+  geom_smooth(method = "loess", se = TRUE, color = "red", alpha = 0.2) +
+  labs(
+    title = "Évolution des Prix Moyens au Cours du Temps",
+    subtitle = "Avec tendance (ligne rouge)",
+    x = "Année",
+    y = "Prix Moyen (€/100g ou 100ml)",
+    caption = "Source : Base Mintel"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(min(prix_par_annee$annee), max(prix_par_annee$annee), by = 1)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+##### prix median
+
+ggplot(prix_par_annee, aes(x = annee, y = prix_median)) +
+  geom_line(color = "darkgreen", size = 1) +
+  geom_point(color = "darkgreen", size = 2) +
+  geom_smooth(method = "loess", se = TRUE, color = "orange", alpha = 0.2) +
+  labs(
+    title = "Évolution des Prix Médians au Cours du Temps",
+    subtitle = "Avec tendance (ligne orange)",
+    x = "Année",
+    y = "Prix Médian (€/100g ou 100ml)",
+    caption = "Source : Base Mintel"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(min(prix_par_annee$annee), max(prix_par_annee$annee), by = 1)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+# Affichage des statistiques annuelles
+knitr::kable(prix_par_annee, 
+             caption = "Statistiques des Prix par Année")
+```
+# Analyse des type de produit lancés sur le marché français
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# Comptage des types de lancement
+launch_dist <- gnpd_french_market_tea %>%
+  filter(!is.na(`Launch Type`)) %>%
+  count(`Launch Type`, sort = TRUE)
+
+print(launch_dist)
+
+ggplot(launch_dist, aes(x = reorder(`Launch Type`, n), y = n)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Répartition des Types de Lancement du Thé en Chine",
+    x = "Type de Lancement",
+    y = "Nombre de Produits",
+    caption = "Source : Base Mintel"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+launch_evolution <- gnpd_french_market_tea %>%
+  mutate(annee = lubridate::year(`Date Published`)) %>%
+  filter(!is.na(`Launch Type`)) %>%
+  group_by(annee, `Launch Type`) %>%
+  summarise(n = n()) %>%
+  ungroup()
+
+ggplot(launch_evolution, aes(x = annee, y = n, color = `Launch Type`)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(
+    title = "Évolution des Types de Lancement du Thé par Année",
+    x = "Année",
+    y = "Nombre de Lancements",
+    color = "Type de Lancement",
+    caption = "Source : Base Mintel"
+  ) +
+  theme_minimal()
+
+```
+
+## test statistiques
+
+```{r}
+library(ggplot2)
+
+ggplot(gnpd_french_market_tea, aes(x = `Launch Type`, y = `Price per 100 g/ml in Euros`)) +
+  geom_boxplot(fill = "lightblue") +
+  coord_flip() +
+  labs(
+    title = "Distribution du Prix par Type de Lancement",
+    x = "Type de Lancement",
+    y = "Prix (€/100g ou 100ml)",
+    caption = "Source : Base Mintel"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+kruskal.test(`Price per 100 g/ml in Euros` ~ `Launch Type`, data = gnpd_french_market_tea)
+
+```
+
+# Interpretation
+
+Le test de Kruskal-Wallis a été réalisé pour évaluer s'il existe une différence significative entre les prix du thé (€/100g ou 100ml) selon les différents types de lancement de produit (Launch Type).
+
+Statistique du test : χ² = 14.72 Degrés de liberté : 4 p-value : 0.0053 Puisque la p-value est inférieure au seuil usuel de 0.05, on rejette l'hypothèse nulle d'égalité des distributions des prix entre les groupes.
+
+👉 Il existe donc à priori une différence statistiquement significative du prix moyen du thé selon le type de lancement
+
+# Analyse de la variable private label
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Préparer les données
+private_label_pie <- gnpd_french_market_tea %>%
+  filter(!is.na(`Private Label`)) %>%
+  count(`Private Label`) %>%
+  mutate(
+    pourcentage = round(100 * n / sum(n), 1),
+    label = paste0(`Private Label`, " (", pourcentage, "%)")
+  )
+
+# Graphique en camembert
+ggplot(private_label_pie, aes(x = "", y = n, fill = `Private Label`)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  geom_text(aes(label = label), position = position_stack(vjust = 0.5), color = "white", size = 5) +
+  scale_fill_manual(values = c("#1b9e77", "#d95f02")) +
+  labs(
+    title = "Répartition des produits entre marques nationales 
+    et MDD",
+    fill = "Type de marque",
+    caption = "Source : Base Mintel"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(hjust = 0.2, size = 16, face = "bold"),
+    legend.position = "none"
+  )
+rm(private_label_pie)
+```
+
+# Resumé statistique
+
+```{r}
+gnpd_french_market_tea %>%
+  filter(!is.na(`Private Label`), !is.na(`Price per 100 g/ml in Euros`)) %>%
+  group_by(`Private Label`) %>%
+  summarise(
+    n = n(),
+    prix_moyen = mean(`Price per 100 g/ml in Euros`, na.rm = TRUE),
+    prix_median = median(`Price per 100 g/ml in Euros`, na.rm = TRUE),
+    prix_min = min(`Price per 100 g/ml in Euros`, na.rm = TRUE),
+    prix_max = max(`Price per 100 g/ml in Euros`, na.rm = TRUE)
+  )
+
+```
+
+```{r}
+ggplot(gnpd_french_market_tea, aes(x = `Private Label`, y = `Price per 100 g/ml in Euros`, fill = `Private Label`)) +
+  geom_boxplot() +
+  scale_y_continuous(limits = c(0, quantile(gnpd_french_market_tea$`Price per 100 g/ml in Euros`, 0.95, na.rm = TRUE))) +
+  labs(
+    title = "Distribution des prix selon le type de marque",
+    x = "Type de marque",
+    y = "Prix (€/100g ou 100ml)",
+    caption = "Source : Base Mintel"
+  ) +
+  theme_minimal()
+
+```
+
+## test de wilcoxon
+
+```{r}
+wilcox.test(`Price per 100 g/ml in Euros` ~ `Private Label`, data = gnpd_french_market_tea)
+
+```
+
+## Interpretation 
+
+Le test est hautement significatif (p \< 0.001) → On rejette l'hypothèse nulle selon laquelle les deux groupes ont la même distribution des prix (en particulier, la même médiane).
+
+Conclusion : Il existe une différence statistiquement significative entre les prix des produits "Branded" et "Private Label".
+
+## Construction de modele d'un premier modele 
+
+```{r}
+lm_model <- lm(`Price per 100 g/ml in Euros` ~ `Private Label`, data = gnpd_french_market_tea)
+summary(lm_model)
+```
+
+## analyse de la qualité du thé sur marché Chine
+
+```{r}
+# Extraction des claims individuels
+claims <- gnpd_french_market_tea %>%
+  filter(!is.na(`Positioning Claims`)) %>%
+  unnest_tokens(claim, `Positioning Claims`, token = "regex",
+                pattern = ",\\s*") %>%
+  count(claim, sort = TRUE)
+
+# Barplot des claims les plus fréquents
+claims %>%
+  slice_max(n, n = 15) %>%
+  ggplot(aes(x = reorder(claim, n), y = n)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Principaux arguments marketing", x = "Claim", y = "Fréquence",caption = "Source : Base Mintel")
+
+```
+
+
+```{r}
+library(dplyr)
+library(tidyr)
+
+# Séparation des claims
+claims_table <- gnpd_french_market_tea %>%
+  separate_rows(`Positioning Claims`, sep = ",") %>%
+  filter(!is.na(`Positioning Claims`)) %>%
+  mutate(`Positioning Claims` = trimws(`Positioning Claims`)) %>%  # Nettoyage des espaces
+  count(`Positioning Claims`, sort = TRUE)
+
+# Top 15 + regroupement des autres
+top_n <- 15
+
+claims_table_top15 <- claims_table %>%
+  mutate(`Positioning Claims` = ifelse(row_number() <= top_n, `Positioning Claims`, "Autres")) %>%
+  group_by(`Positioning Claims`) %>%
+  summarise(Frequence = sum(n), .groups = "drop") %>%
+  arrange(desc(Frequence)) %>%
+  mutate(Part = round(Frequence / sum(Frequence) * 100, 2))
+
+# Affichage du tableau final
+claims_table_top15
+
+```
+
+Les claims marketing ont été regroupés en six catégories, selon les typologies proposées par Grunert (2005), Verbeke (2008), Aschemann-Witzel et al. (2013), et Kihlberg & Risvik (2007), qui distinguent les dimensions nutritionnelles, fonctionnelles, environnementales, sensorielles, pratiques, et socio-démographiques des allégations de produits alimentaires.
+
+```{r}
+library(dplyr)
+library(stringr)
+
+# Définir les mots-clés pour chaque catégorie
+claims_sante <- c("antioxidant", "functional - digestive", "functional - energy", "functional - slimming",
+                  "functional - other", "functional - stress & sleep", "functional - immune system",
+                  "functional - beauty benefits", "functional - brain & nervous system",
+                  "functional - cardiovascular", "functional - bone health", "functional - skin",
+                  "high satiety", "anti-ageing", "nails & hair", "vitamin/mineral fortified")
+
+claims_nutrition <- c("caffeine free", "no additives/preservatives", "free from added/artificial flavourings",
+                      "free from added/artificial additives", "free from added/artificial preservatives",
+                      "free from added/artificial colourings", "low/no/reduced allergen", "low/no/reduced calorie",
+                      "vegetarian", "vegan/no animal ingredients", "kosher", "gmo free", "sugar free",
+                      "no added sugar", "diabetic", "low/no/reduced fat", "low/no/reduced sodium",
+                      "low/no/reduced lactose", "wholegrain")
+
+claims_ethique <- c("organic", "ethical - environmentally friendly package", "ethical - recycling",
+                    "ethical - environmentally friendly product", "ethical - human",
+                    "ethical - sustainable (habitat/resources)", "ethical - toxins free",
+                    "ethical - biodegradable", "ethical - charity", "carbon neutral", "ethical - animal")
+
+claims_packaging <- c("convenient packaging", "time/speed", "ease of use", "interesting packaging",
+                      "microwaveable", "refill/refillable", "portionability", "on-the-go")
+
+claims_marketing <- c("premium", "social media", "seasonal", "limited edition", "event merchandising",
+                      "novel", "cobranded", "economy")
+
+claims_ciblage <- c("maternal", "children (5-12)", "female", "male", "plant based")
+
+# Fonction pour détecter la présence d'un mot-clé
+detect_claim <- function(text, keywords) {
+  if (is.na(text)) return("non")
+  any(str_detect(text, fixed(keywords, ignore_case = TRUE))) %>% ifelse("oui", "non")
+}
+
+# Créer les colonnes
+gnpd_french_market_tea <- gnpd_french_market_tea %>%
+  mutate(claim_sante = map_chr(`Positioning Claims`, ~ detect_claim(.x, claims_sante)))
+gnpd_french_market_tea <- gnpd_french_market_tea %>%
+  mutate(
+    claim_nutrition = map_chr(`Positioning Claims`, ~ detect_claim(.x, claims_nutrition)))
+gnpd_french_market_tea <- gnpd_french_market_tea %>%
+  mutate(
+    claim_ethique = map_chr(`Positioning Claims`, ~ detect_claim(.x, claims_ethique)))
+gnpd_french_market_tea <- gnpd_french_market_tea %>%
+  mutate(
+    claim_packaging = map_chr(`Positioning Claims`, ~ detect_claim(.x, claims_packaging)))
+gnpd_french_market_tea <- gnpd_french_market_tea %>%
+  mutate(
+    claim_marketing = map_chr(`Positioning Claims`, ~ detect_claim(.x, claims_marketing)))
+gnpd_french_market_tea <- gnpd_french_market_tea %>%
+  mutate(
+    claim_ciblage = map_chr(`Positioning Claims`, ~ detect_claim(.x, claims_ciblage)))
+
+```
+## Creation  de la variable score qualité en fonction de l'argument marketing
+
+```{r}
+gnpd_french_market_tea <- gnpd_french_market_tea %>%
+  mutate(
+    score_qualite = 
+      5 * (claim_sante == "oui") +
+      4 * (claim_nutrition == "oui") +
+      5 * (claim_ethique == "oui") +
+      1.5 * (claim_packaging == "oui") +
+      2.5 * (claim_marketing == "oui") +
+      0.5 * (claim_ciblage == "oui")
+  )
+
+gnpd_french_market_tea <- gnpd_french_market_tea %>%
+  mutate(
+    niveau_qualite = case_when(
+      score_qualite <= 4 ~ "faible",
+      score_qualite <= 11 ~ "moyenne",
+      score_qualite > 11 ~ "élevée"
+    )
+  )
+
+```
+
+# Analyse score vs prix
+
+```{r}
+gnpd_french_market_tea %>%
+  filter(!is.na(niveau_qualite), !is.na(`Price per 100 g/ml in Euros`)) %>%
+  group_by(niveau_qualite) %>%
+  summarise(
+    n = n(),
+    prix_moyen = mean(`Price per 100 g/ml in Euros`, na.rm = TRUE),
+    prix_median = median(`Price per 100 g/ml in Euros`, na.rm = TRUE),
+    prix_min = min(`Price per 100 g/ml in Euros`, na.rm = TRUE),
+    prix_max = max(`Price per 100 g/ml in Euros`, na.rm = TRUE)
+  ) %>%
+  arrange(prix_moyen)
+
+```
+```{r}
+ggplot(gnpd_french_market_tea, aes(x = factor(niveau_qualite), y = `Price per 100 g/ml in Euros`)) +
+  geom_boxplot(fill = "#69b3a2", alpha = 0.7) +
+  #geom_jitter(width = 0.2, alpha = 0.3, color = "grey30") +
+  labs(
+    title = "Relation entre Score de Qualité et Prix",
+    x = "Score de Qualité ",
+    y = "Prix (€/100g ou 100ml)",
+    caption = "Source : Base Mintel"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+modele_score <- lm(
+  `Price per 100 g/ml in Euros` ~ niveau_qualite, 
+  data = gnpd_french_market_tea
+)
+summary(modele_score)
+
+```
+
