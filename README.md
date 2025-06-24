@@ -29,7 +29,7 @@ Cette analyse repose sur l’exploitation de la base de données **MINTEL GNPD**
 - Des graphiques et figures d’analyse de marché
 - Des fichiers de données utilisés à des fins exploratoires
 
-## Auteure : KOUASSI Konan
+## Auteur : KOUASSI Konan
 Stage de 2ᵉ année, Institut Agro Rennes-Angers  
 Supervisé par Monsieur DAMIEN ROUSSELIERE, dans le cadre du projet Fierthé
 
