@@ -22,7 +22,7 @@ library(stringr)
 # ----------------------------------------------------------------------------
 # 2. FONCTIONS UTILITAIRES
 # ----------------------------------------------------------------------------
-# Fonction améliorée pour extraire une valeur numérique avec regex
+# Fonction  pour extraire une valeur numérique avec regex
 extract_nutrition_value <- function(text, pattern) {
   text <- tolower(text)
   matches <- str_match(text, pattern)
