@@ -18,88 +18,12 @@ library(gridExtra)
 library(ggrepel)  
 
 # Importation des donnees
-gnpd_brut <- read_excel("GNPD_tea.xlsx")
-
-# apperçu globale des variables
-glimpse(gnpd_brut)
-summary(gnpd_brut)
-
-# convertissement de certaine variable en numerique 
-gnpd_brut <- gnpd_brut %>%
-  mutate(
-    `Price per 100 g/ml in Euros` = as.numeric(`Price per 100 g/ml in Euros`),
-    `Price in US Dollars` = as.numeric(`Price in US Dollars`),
-    `Price in Euros` = as.numeric(`Price in Euros`),
-    `Unit Pack Size (ml/g)` = as.numeric(`Unit Pack Size (ml/g)`),
-    `Alcohol By Volume (%)` = as.numeric(`Alcohol By Volume (%)`),
-    `Bar Code` = as.character(`Bar Code`),
-    `Date Published` = as.Date(`Date Published`),
-    year = year(`Date Published`),
-    month = floor_date(`Date Published`, "month")
-  )
-
-
-# Creation d'une nouvelle variable 
-gnpd_brut <- gnpd_brut %>%
-  mutate(`Famille thé` = case_when(
-    `Sub-Category` == "Tea" ~ "Thé",
-    `Sub-Category` == "RTD (Iced) Tea" ~ "Thé prêt à boire",
-    `Sub-Category` %in% c("Kombucha & Other Fermented Drinks", 
-                          "Flavoured Water","Beverage Mixes",
-                          "Beverage Concentrates","RTD (Iced) Coffee",
-                          "Energy Drinks","Flavoured Water",
-                          "Flavoured Alcoholic Beverages","Wine",
-                          "Carbonated Soft Drinks","Vodka","Liqueur",
-                          "Juice","Coffee","Beer","Malt & Other Hot Beverages" ,
-                          "Fruit/Flavoured Still Drinks","Drinking Yogurt & Liquid Cultured Milk",
-                          "Nectars","Plant Based Drinks (Dairy Alternatives)",
-                          "Flavoured Milk",
-                          "Sports Drinks","Nutritional & Meal Replacement Drinks") ~ "Autres boissons contenant du thé",
-    
-    `Sub-Category` %in% c("Cat Snacks & Treats",
-                          "Cat Food Dry",
-                          "Cat Food Wet",
-                          "Dog Snacks & Treats",
-                          "Dog Food Dry",
-                          "Dog Food Wet") ~ "Aliments pour animaux contenant du thé",
-    TRUE ~ "Autres produits contenant du thé"
-  ))  
-
-
-# Creation de la variable region 
-
-  gnpd_brut <- gnpd_brut %>%
-    filter(!is.na(Market)) %>% 
-    mutate(
-      Region_Marche = case_when(
-        Market %in% c("China", "Japan", "South Korea", "Taiwan, China", "Hong Kong,China", 
-                      "Vietnam", "Thailand", "Indonesia", "Malaysia", "Philippines", 
-                      "Singapore", "Myanmar", "Cambodia", "Laos","Sri Lanka","India","Bangladesh",
-                      "Hong Kong, China") ~ "Asie",
-        Market %in% c("UK", "France", "Germany", "Italy", "Spain", "Switzerland", 
-                      "Netherlands", "Belgium", "Sweden", "Denmark", "Norway", "Finland", 
-                      "Austria", "Poland", "Greece", "Portugal", "Ireland", "Luxembourg",
-                      "Czech Republic", "Slovakia", "Slovenia", "Estonia", "Latvia", 
-                      "Lithuania", "Hungary", "Romania", "Bulgaria", "Croatia", "Serbia",
-                      "Ukraine", "Belarus", "Russia") ~ "Europe",
-        Market %in% c("USA", "Canada", "Mexico", "Puerto Rico") ~ "Amérique du Nord",
-        Market %in% c("Brazil", "Argentina", "Colombia", "Chile", "Peru", "Venezuela", 
-                      "Ecuador", "Paraguay", "Uruguay", "Panama", "Costa Rica", 
-                      "Guatemala") ~ "Amérique du Sud",
-        Market %in% c("Australia", "New Zealand") ~ "Océanie",
-        Market %in% c("South Africa", "Kenya", "Tanzania", "Uganda", "Nigeria", 
-                      "Egypt", "Morocco", "Algeria", "Tunisia", "Ghana", "Ivory Coast",
-                      "Ethiopia", "Cameroon") ~ "Afrique",
-        Market %in% c("UAE", "Saudi Arabia", "Israel", "Turkey", "Iran", "Jordan", 
-                      "Oman", "Qatar", "Kuwait", "Lebanon", "Bahrain","Pakistan") ~ "Moyen-Orient",
-        TRUE ~ "Autres"
-      )
-    )  
-
+gnpd_brut <- readRDS("df_final.rds")
 
 # Determinantion du taux de Na par variable
 
 colSums(is.na(gnpd_brut)) # pour connaitre le nombre de Na par variable
+
 df <- gnpd_brut
 na_summary <- data.frame(
   Column = names(df),
@@ -115,7 +39,7 @@ rm(df,na_summary)
 
 ################################################################################
 #-------------------------------------------------------------------------------
-# Statistique descriptive
+#         Statistique descriptive
 #===============================================================================
 
 # Lancement dans le temps 
@@ -187,194 +111,6 @@ grid.arrange(p1,p2, ncol=1)
 rm(p1,p2)
 #####################
 
-# 1. Préparation des données (ajout des labels pour les dernières années)
-evolution_data <- evolution_data %>%
-  group_by(`Famille thé`) %>%
-  mutate(
-    last_year = (year == max(year)),
-    label = if_else(last_year, `Famille thé`, NA_character_)
-  )
-
-# 2. Graphique
-ggplot(evolution_data, aes(x = year, y = n, color = `Famille thé`, group = `Famille thé`)) +
-  # Lignes et points
-  geom_line(linewidth = 1.2, alpha = 0.8) +
-  geom_point(size = 3, alpha = 0.8) +
-  
-  # Labels de fin de courbe
-  geom_label_repel(
-    aes(label = label),
-    na.rm = TRUE,
-    hjust = 0,
-    direction = "y",
-    segment.color = NA,
-    size = 3.5,
-    fontface = "bold",
-    show.legend = FALSE
-  ) +
-  
-  # Échelles et couleurs
-  scale_x_continuous(breaks = seq(min(evolution_data$year), max(evolution_data$year), by = 2)) +
-  scale_color_viridis_d(option = "plasma", end = 0.9) +  # Palette moderne
-  #scale_y_continuous(expand = expansion(mult = c(0.05, 0.1))) +  # Espace pour les labels
-  
-  # Titres et thème
-  labs(
-    title = "Évolution des lancements de produits par famille de thé",
-    subtitle = "Analyse des tendances annuelles (données Mintel GNPD)",
-    x = "Année",
-    y = "Nombre de produits lancés",
-    caption = "Source : Mintel GNPD | Projet Fierthé"
-  ) +
-  theme_minimal(base_size = 12) +
-  theme(
-    legend.position = "none",  # Supprime la légende (remplacée par les labels)
-    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
-    plot.subtitle = element_text(hjust = 0.5, color = "gray40"),
-    plot.caption = element_text(color = "gray50", margin = margin(t = 10)),
-    panel.grid.major = element_line(color = "gray90"),
-    axis.title = element_text(face = "bold")
-  )
-#-------------------------------------------------------------------------------
-# Analyse des prix 
-#-------------------------------------------------------------------------------
-# Test de Anderson-Darling (plus robuste pour grands échantillons)
-if (!require("nortest")) install.packages("nortest") # pour eviter de reinstaller
-if (!require("moments")) install.packages("moments")
-library(moments)
-library(nortest)
-
-prix <- gnpd_brut$`Price per 100 g/ml in Euros`
-prix <- na.omit(prix)
-
-ad.test(prix) # pour tester l'hypothèse de normalité du prix
-
-# Coefficient d'asymétrie (skewness) et  d'aplatissement (Kurtosis)
-skewness(prix)
-kurtosis(prix)
-summary(prix)
-
-gnpd_clean <- gnpd_brut %>% 
-  filter(!is.na(`Price per 100 g/ml in Euros`),
-         `Price per 100 g/ml in Euros`< quantile(`Price per 100 g/ml in Euros`,
-                                                 0.99, na.rm = T))  # on retire le top 1%
-ggplot(gnpd_clean, aes(x = `Price per 100 g/ml in Euros`)) +
-  geom_histogram(fill = "#2a9d8f", color = "white", boundary=0, binwidth = 2) +
-  scale_x_continuous(breaks = seq(0, 40, 4)) +
-  labs(title = "Distribution du prix (€/100g ou ml)", x = "Prix", y = "Fréquence")
-
-# Elimination des variables "abberantes"
-
-# option 1: Filtrer les données selon vos conditions
-# gnpd_filtered <- gnpd_brut %>%
-#   filter(
-#     `Unit Pack Size (ml/g)` >= 2,
-#     `Unit Pack Size (ml/g)` <= 5000,
-#     `Unit Pack Size (ml/g)` != 0.00,
-#     `Price per 100 g/ml in Euros` != 0.00
-#   )
-
-# option 2 : Imputation des valeurs aberrantes par sous categorie et marché
-# gnpd_imputed <- gnpd_brut %>%
-#   group_by(`Famille thé`, `Market`) %>%  # Remplacez par vos colonnes exactes
-#   mutate(
-#     # Calcul des quartiles et moyennes par groupe
-#     Q1_price = quantile(`Price per 100 g/ml in Euros`, 0.25, na.rm = TRUE),
-#     Q3_price = quantile(`Price per 100 g/ml in Euros`, 0.99, na.rm = TRUE),
-#     mean_low = quantile(`Price per 100 g/ml in Euros`[`Price per 100 g/ml in Euros` < Q1_price],
-#                         0.5,na.rm = TRUE),
-#     mean_high = quantile(`Price per 100 g/ml in Euros`[`Price per 100 g/ml in Euros` > Q3_price],
-#                          0.5,na.rm = TRUE),
-#     
-#     # Remplacement des valeurs extrêmes
-#     `Price per 100 g/ml in Euros` = case_when(
-#       `Price per 100 g/ml in Euros` < Q1_price ~ mean_low,
-#       `Price per 100 g/ml in Euros` > Q3_price ~ mean_high,
-#       TRUE ~ `Price per 100 g/ml in Euros`
-#     )
-#   ) %>%
-#   ungroup()
-# 
-# Optionnel: Vérification des résultats
-# summary(gnpd_imputed$`Price per 100 g/ml in Euros`)
-# boxplot(gnpd_imputed$`Price per 100 g/ml in Euros`, main = "Prix après imputation")
-
-# # Étape 1 : Filtrer et calculer la proportion
-# gnpd <- gnpd_brut
-# total_lignes <- nrow(gnpd)
-# 
-# gnpd_filtre <- gnpd %>%
-#   filter(`Unit Pack Size (ml/g)` >= 2,
-#          `Unit Pack Size (ml/g)`!= 0.00,
-#          `Price per 100 g/ml in Euros` != 0.00)
-# gnpd_filtre <- gnpd_filtre %>%
-#   filter(`Unit Pack Size (ml/g)` <= 5000)
-# 
-# proportion_conservee <- nrow(gnpd_filtre) / total_lignes
-# 
-# # Affichage de la proportion conservée
-# proportion_conservee
-
-# gnpd <- gnpd_filtre
-summary(gnpd_brut$`Price per 100 g/ml in Euros`)
-gnpd_clean <- gnpd_brut %>% 
-  filter(!is.na(`Price per 100 g/ml in Euros`),
-         `Price per 100 g/ml in Euros`< quantile(`Price per 100 g/ml in Euros`,
-                                                 0.99, na.rm = T))  # on retire le top 1%
-
-# 4. Graphique final avec annotation dynamique
-p1 <- ggplot(gnpd_clean, aes(x = `Price per 100 g/ml in Euros`)) +
-        geom_histogram(binwidth = 1, boundary = 0, fill = "skyblue", alpha = 1) +
-        geom_vline(xintercept = median(gnpd_brut$`Price per 100 g/ml in Euros`, na.rm = TRUE), 
-                   color = "red", linetype = "dashed", size = 1) +
-        geom_vline(xintercept = mean(gnpd_brut$`Price per 100 g/ml in Euros`, na.rm = TRUE), 
-                   color = "green", linetype = "dashed", size = 1) +
-        coord_cartesian(xlim = c(0, 30)) + # Zoom sur 0-50€
-        scale_x_continuous(breaks = seq(0, 30, 5)) +
-        labs(
-          title = "Distribution des prix (99% des produits)", 
-          subtitle = "La ligne rouge montre la médiane (1,17€) 
-          et la verte la moyenne (4,35€)",
-          x = "Prix pour 100g/ml (€)", 
-          y = "Nombre de produits",
-          caption = "Source : Base Mintel"
-        ) +
-        theme_minimal()
-rm(hist_data,hist_plot,max_count,pct_under_5)
-
-#############
-# analyse du prix du thé sur le marché mondiale
-gnpd_tea <- gnpd_brut %>% 
-  filter(`Sub-Category` == "Tea")
-summary(gnpd_tea$`Price per 100 g/ml in Euros`)
-# 1. Filtrage des données (on garde 99% les moins chers)
-gnpd_filtered <- gnpd_tea %>%
-  filter(`Sub-Category` == "Tea")
-
-
-# 2. Graphique final avec annotation dynamique
-p2 <- ggplot(gnpd_filtered, aes(x = `Price per 100 g/ml in Euros`)) +
-        geom_histogram(binwidth = 1, boundary = 0, fill = "darkblue", alpha = 1) +
-        geom_vline(xintercept = median(gnpd_tea$`Price per 100 g/ml in Euros`, na.rm = TRUE), 
-                   color = "red", linetype = "dashed", size = 1) +
-        geom_vline(xintercept = mean(gnpd_tea$`Price per 100 g/ml in Euros`, na.rm = TRUE), 
-                   color = "green", linetype = "dashed", size = 1) +
-        coord_cartesian(xlim = c(0, 30)) + # Zoom sur 0-50€
-        scale_x_continuous(breaks = seq(0, 30, 5)) +
-        labs(
-          title = "Distribution des prix du thé (99% des produits)", 
-          subtitle = "La ligne rouge montre la médiane 
-          et la verte la moyenne ",
-          x = "Prix pour 100g/ml (€)", 
-          y = "Nombre de produits",
-          caption = "Source : Base Mintel"
-        ) +
-        theme_minimal()
-
-grid.arrange(p1, p2, ncol = 1) # Affichage des deux graphique sur une colonne
-rm(gnpd_filtered,hist_data,hist_plot,max_count,pct_under_5,p1,p2,prix)
-
-
 #####################
 # Evolution de densité
 ggplot(gnpd_brut, aes(x = `Price per 100 g/ml in Euros`)) +
@@ -388,33 +124,13 @@ ggplot(gnpd_brut, aes(x = `Price per 100 g/ml in Euros`, fill = `Famille thé`))
   coord_cartesian(xlim = c(0, 20))
 
 
-# Distribution générale
-ggplot(gnpd_brut, aes(x = `Price per 100 g/ml in Euros`)) +
-  geom_boxplot(fill = "skyblue") +
-  labs(title = "Distribution des prix par 100g/ml",
-       x = "Prix en euros",
-       y = "Nombre de produits") +
-  scale_x_continuous(labels = comma)
-summary(gnpd$`Price per 100 g/ml in Euros`)
 
-# Boxplot par sous-catégorie
-gnpd_brut %>%
-  filter(!is.na(`Price per 100 g/ml in Euros`),
-         `Price per 100 g/ml in Euros`<100) %>%
-  group_by(`Famille thé`) %>%
-  filter(n() >= 10) %>%
-  ggplot(aes(x = reorder(`Famille thé`, `Price per 100 g/ml in Euros`, median),
-             y = `Price per 100 g/ml in Euros`)) +
-  geom_boxplot(fill = "orange") +
-  coord_flip() +
-  labs(title = "Prix par sous-catégorie", x = "Sous-catégorie", y = "Prix par 100g/ml")
-
-
-gnpd <- gnpd_tea
+gnpd <- gnpd_brut
 # Claims marketing
 # Extraction des claims individuels
 claims <- gnpd %>%
-  filter(!is.na(`Positioning Claims`)) %>%
+  filter(!is.na(`Positioning Claims`),
+         `Sub-Category`=="Tea") %>%
   unnest_tokens(claim, `Positioning Claims`, token = "regex",
                 pattern = ",\\s*") %>%
   count(claim, sort = TRUE)
@@ -430,6 +146,30 @@ claims %>%
        caption = "Source : Base Mintel")
 
 
+######################### Focus sur la France ##################################
+
+# Claims marketing
+# Extraction des claims individuels
+claims <- gnpd %>%
+  filter(!is.na(`Positioning Claims`),
+         `Sub-Category`=="Tea",
+         Market == "France") %>%
+  unnest_tokens(claim, `Positioning Claims`, token = "regex",
+                pattern = ",\\s*") %>%
+  count(claim, sort = TRUE)
+# Barplot des claims les plus fréquents
+claims %>%
+  slice_max(n, n = 15) %>%
+  ggplot(aes(x = reorder(claim, n), y = n)) +
+  geom_col(fill = "blue3") +
+  coord_flip() +
+  labs(title = "Principaux arguments marketing thé brut ",
+       subtitle = "Pour le marché 2000-2025",
+       x = "Claim", 
+       y = "Fréquence",
+       caption = "Source : Base Mintel")
+
+################### {Nuage de mots des claims}  ################################
 library(tm)
 set.seed(123)
 text_corpus <- Corpus(VectorSource(gnpd$`Positioning Claims`))
@@ -457,55 +197,87 @@ d[,1]
 library(dplyr)
 library(stringr)
 
-unique(gnpd_tea$`Positioning Claims`)
-
-
 # Définir les mots-clés pour chaque catégorie
-# 1. Santé & Bien-être 
+# 1. Santé & Bien-être
 claims_sante <- c(
-  "antioxidant", "functional - digestive", "functional - energy", 
-  "functional - slimming", "functional - other", "functional - stress & sleep", 
-  "functional - immune system", "functional - beauty benefits", 
-  "functional - brain & nervous system", "functional - cardiovascular", 
-  "functional - bone health", "functional - skin", "high satiety", 
-  "anti-ageing", "nails & hair", "vitamin/mineral fortified","fonctionnal"
+  "Functional - Energy","Functional - Other","Functional - Brain & Nervous System",
+  "Functional - Digestive","Functional - Immune System","Antioxidant",
+  "Functional - Bone Health","Functional - Skin, Nails & Hair","Functional - Cardiovascular",
+  "Probiotic","Functional - Stress & Sleep(5)
+Water Resistant","Functional - Weight & Muscle Gain","Functional - Beauty Benefits",
+  "Functional - Eye Health","Functional - Slimming","High Satiety","Prebiotic",
+  "Anti-Bacterial","Anti-Perspirant","Breath-Freshening","Cleansing","Exfoliating",
+  "Homeopathic","Long-Lasting","Odour Neutralising","Protects Against Elements",
+  "UV Protection","Waterproof","No Added Sugar","Low/Reduced Sugar","Sugar Free",
+  "Low/No/Reduced Calorie","Low/No/Reduced Carb","Low/No/Reduced Sodium","Diet/Light",
+  "Low/No/Reduced Fat","Low/No/Reduced Cholesterol","Low/No/Reduced Glycemic",
+  "Low/No/Reduced Saturated Fat","Low/No/Reduced Transfat","Low/Reduced Alcohol",
+  "Not Pasteurised","High/Added Fibre","Vitamin/Mineral Fortified","High/Added Protein",
+  "Added Calcium","Stanols/Sterols","Low/No/Reduced Allergen","Low/No/Reduced Lactose","Diabetic",
+  ## beauté :
+  "Anti-Ageing","All Skin Tones","Anti-Acne","Anti-Cellulite","Anti-Dandruff","Anti-Hairloss",
+  "Brightening / Illuminating","Collagen Increasing","Damaged Hair","Firming",
+  "Gradual Self-Tanning","Mattifying","Moisturising / Hydrating","Plumping",
+  "Reduces Dark Circles / Puffiness","Reduces Fine Lines / Wrinkles","Reduces Redness",
+  "Reduces the Appearance of Pores","Slimming","Toning","Whitening"
 )
 
-# 2. Naturalité & Propreté (free-from + caractéristiques produits)
+# 2. Naturalité & Propreté
 claims_naturel <- c(
-  "caffeine free", "no additives/preservatives", 
-  "free from added/artificial flavourings", "free from added/artificial additives", 
-  "free from added/artificial preservatives", "free from added/artificial colourings", 
-  "low/no/reduced allergen", "low/no/reduced calorie", "sugar free", 
-  "no added sugar", "low/no/reduced fat", "low/no/reduced sodium", 
-  "low/no/reduced lactose", "wholegrain", "plant based","Gluten Free", "Halal",
-  "Dairy Free", "Alcohol Free","gmo free"
+  "Botanical/Herbal","All Natural Product","GMO Free","No Additives/Preservatives",
+  "Free from Added/Artificial Preservatives","Free from Added/Artificial Colourings",
+  "Free from Added/Artificial Flavourings","Free from Added/Artificial Additives",
+  "Wholegrain","Aromatherapy","Dairy Free","Alcohol Free","Hormone Free","Caffeine Free",
+  "Palm Oil Free","Fragrance Free","Grain Free","Mineral","Oil/Petroleum Free","Oil Free",
+  "Paraben Free","pH Balanced","Silicone Free","Sulphate/Sulfate Free"
 )
 
 # 3. Ciblage & Besoins Spécifiques 
 claims_ciblage <- c(
-  # Démographie
-  "maternal", "children (5-12)", "female", "male",
-  # Régimes/Restrictions
-  "vegetarian", "vegan/no animal ingredients", "kosher", "gmo free", "diabetic",
-  "Halal"
+  # Demographie
+  "Children (5-12)", "Babies & Toddlers (0-4)", 
+  "Female", "Male", "Maternal", "Seniors (aged 55+)","teenagers (13-17)",
+  "Ethnic",
+  # COnviens pour
+  "Vegetarian", "Vegan/No Animal Ingredients", "Gluten Free","Low/No/Reduced Lactose",  "Kosher", "Halal", "Diabetic", "Diet/Light","Low/No/Reduced Allergen",
+  "Plant Based",
+  # cyblage animaux
+  "Anti-Parasite","Functional Pet - Brain & Nervous System","Functional Pet - Digestion","Functional Pet - Eyesight","Functional Pet - Heart & Cardiovascular System","Functional Pet - Immune System","Functional Pet - Joints, Bones & Muscles","Functional Pet - Other","Functional Pet - Skin & Coat","Functional Pet - Slimming","Functional Pet - Teeth & Tartar Prevention","Functional Pet - Urinary Tract","Functional Pet - Weight & Muscle Gain","Pet - Adult","Pet - Junior","Pet - Senior"
 )
 
-# 4. Éthique & Durabilité 
+# 4. Éthique 
 claims_ethique <- c(
-  "organic", "ethical - environmentally friendly package", "ethical - recycling",
-  "ethical - environmentally friendly product", "ethical - human",
-  "ethical - sustainable (habitat/resources)", "ethical - toxins free",
-  "ethical - biodegradable", "ethical - charity", "carbon neutral", 
-  "ethical - animal","biodegradable packaging", "S"
+  "ethical - human", "ethical - charity", "ethical - animal", "ethical",
+  "fair trade", "equitable", "social responsibility"
 )
 
-# 5. Packaging & Convenience 
+# 5. Bio
+claims_bio <- c(
+  "organic", "bio", "biologique", "non-GMO","GMO Free",
+  "pesticide-free"
+)
+
+# 6. Environnement
+claims_environnement <- c(
+  "ethical - environmentally friendly package", "ethical - recycling",
+  "ethical - sustainable (habitat/resources)", "ethical - toxins free",
+  "ethical - biodegradable", "carbon neutral", "biodegradable packaging",
+  "sustainable", "recyclable", "compostable", "eco-friendly", "zero waste"
+)
+
+# 7. Packaging & Convenience 
 claims_strategie <- c(
   "convenient packaging", "time/speed", "ease of use", "interesting packaging",
   "microwaveable", "refill/refillable", "portionability", "on-the-go",
-  "biodegradable packaging","premium", "social media", "seasonal", "limited edition", 
-  "event merchandising", "novel", "cobranded","economy"
+  "biodegradable packaging","premium", "social media", "seasonal", "limited edition",
+  "Personalised Formulation","Innovative Ingredient","Doctor Brand",
+  "event merchandising", "novel", "cobranded","economy","Wholegrain",
+  # Product tested:
+  "Dermatologically Tested","Allergy Tested","For Balanced Skin","For Combination Skin",
+  "For Dry Skin","For Oily Skin","For Sensitive Skin","For Sensitive","Teeth/Gums",
+  "Hypoallergenic","Non-Acnegenic","Non-Comedogenic","Ophthalmologically Tested",
+  "Skin Disorders","Skin Disorders - Dermatitis","Skin Disorders - Diaper Rash",
+  "Skin Disorders - Eczema","Skin Disorders - Psoriasis","Skin Disorders - Warts"
 )
 
 # # 6. Marketing & Positionnement (stratégie produit)
@@ -526,11 +298,13 @@ gnpd_claim <- gnpd_brut %>%
     claim_naturel = map_chr(`Positioning Claims`, ~ detect_claim(.x, claims_naturel)),
     claim_ethique = map_chr(`Positioning Claims`, ~ detect_claim(.x, claims_ethique)),
     claim_strategie = map_chr(`Positioning Claims`, ~ detect_claim(.x, claims_strategie)),
-    claim_ciblage = map_chr(`Positioning Claims`, ~ detect_claim(.x, claims_ciblage))
+    claim_ciblage = map_chr(`Positioning Claims`, ~ detect_claim(.x, claims_ciblage)),
+    claim_bio = map_chr(`Positioning Claims`, ~ detect_claim(.x, claims_bio)),
+    claim_environnement = map_chr(`Positioning Claims`, ~ detect_claim(.x, claims_environnement))
   )
 
 rm(claims_ciblage,claims_ethique,claims_marketing,claims_nutrition,
-   claims_sante,claims_sante)
+   claims_sante,claims_sante,claims_environnement,claims_bio)
 
 
 
@@ -541,13 +315,14 @@ unique(claims[,1])
 
 # Type d'embalage
 gnpd_brut %>%
-  filter(!is.na(`Package Type`)) %>% 
+  filter(!is.na(`Package Type`),
+         `Sub-Category` == "Tea") %>% 
   count(`Package Type`, sort = TRUE) %>%
   slice_max(n, n = 20) %>%
   ggplot(aes(x = reorder(`Package Type`, n), y = n)) +
-  geom_col(fill = "darkred") +
+  geom_col(fill = "darkgreen") +
   coord_flip() +
-  labs(title = "Top 20 des types d'emballage", 
+  labs(title = "Top 20 des types d'emballage du thé brut", 
        x = "Type d'emballage",
        y = "Nombre de produits",
        caption = "Source : Mintel")
@@ -567,6 +342,72 @@ gnpd_brut %>%
        y = "Nombre de produits",
        caption = "Source : Mintel")
 
+
+
+
+########################### les embalages du thé brut ##########################
+library(dplyr)
+library(ggplot2)
+
+# Définir le nombre de catégories à afficher (top N)
+top_n <- 10  #  modifiable
+
+gnpd_brut %>%
+  filter(!is.na(`Package Type`),
+         `Sub-Category` == "Tea") %>% 
+  # Compter et classer les types d'emballage
+  count(`Package Type`, sort = TRUE) %>%
+  # Créer une nouvelle colonne pour les catégories regroupées
+  mutate(`Package Type Grouped` = ifelse(row_number() <= top_n, 
+                                         as.character(`Package Type`), 
+                                         "Autres")) %>%
+  # Regrouper et sommer les "Autres"
+  group_by(`Package Type Grouped`) %>%
+  summarise(n = sum(n)) %>%
+  # Trier par nombre décroissant (avec "Autres" en dernier)
+  arrange(ifelse(`Package Type Grouped` == "Autres", Inf, -n)) %>%
+  # Créer le graphique
+  ggplot(aes(x = reorder(`Package Type Grouped`, n), y = n)) +
+  geom_col(fill = "#26C4EC") +
+  coord_flip() +
+  labs(title = paste("Top", top_n, "des types d'emballage du thé"), 
+       subtitle = "Les autres types sont regroupés dans 'Autres'",
+       x = "Type d'emballage",
+       y = "Nombre de produits",
+       caption = "Source : Mintel") +
+  theme_minimal()
+
+
+##############       { materiau d'ambalage}  ###################################
+top_n <- 15  #  modifiable
+
+gnpd_brut %>%
+  filter(!is.na(`Package Material`),
+         `Sub-Category` == "Tea") %>% 
+  # Compter et classer les types d'emballage
+  count(`Package Material`, sort = TRUE) %>%
+  # Créer une nouvelle colonne pour les catégories regroupées
+  mutate(`Package Material Grouped` = ifelse(row_number() <= top_n, 
+                                         as.character(`Package Material`), 
+                                         "Autres")) %>%
+  # Regrouper et sommer les "Autres"
+  group_by(`Package Material Grouped`) %>%
+  summarise(n = sum(n)) %>%
+  # Trier par nombre décroissant (avec "Autres" en dernier)
+  arrange(ifelse(`Package Material Grouped` == "Autres", Inf, -n)) %>%
+  # Créer le graphique
+  ggplot(aes(x = reorder(`Package Material Grouped`, n), y = n)) +
+  geom_col(fill = "#048B9A") +
+  coord_flip() +
+  labs(title = paste("Top", top_n, "des materiaux d'emballage du thé"), 
+       subtitle = "Les autres materiaux sont regroupés dans 'Autres'",
+       x = "materiaux d'emballage",
+       y = "Nombre de produits",
+       caption = "Source : Mintel") +
+  theme_minimal()
+
+
+################################################################################
 
 # Sous-catégories les plus présentes
 top3_cat <- gnpd_brut %>%
@@ -628,27 +469,29 @@ ggplot(gnpd_clean, aes(y = `Price per 100 g/ml in Euros`)) +
 ################################################################################
 # Analyse bivariée : Prix vs. Positioning Claims
 ################################################################################
-gnpd_clean <- gnpd_clean %>%
-  filter(!is.na(`Positioning Claims`)) %>% 
-  mutate(claim_organic = ifelse(str_detect(`Positioning Claims`, "Organic"), "Organic", "Non-Organic"))
+# gnpd_clean <- gnpd_claim %>%
+#   filter(!is.na(`Positioning Claims`)) %>%
+#   mutate(claim_organic = ifelse(str_detect(`Positioning Claims`, "Organic"), "Organic", "Non-Organic"))
+# 
+# 
+# 
+# gnpd_clean <- gnpd_clean %>%
+#   filter(!is.na(`Positioning Claims`)) %>%
+#   mutate(claim_category = case_when(
+#     str_detect(`Positioning Claims`, regex("Ethical", ignore_case = TRUE)) ~ "Ethical",
+#     str_detect(`Positioning Claims`, regex("Functional", ignore_case = TRUE)) ~ "Functional",
+#     str_detect(`Positioning Claims`, regex("Environmentally|friendly", ignore_case = TRUE)) ~ "Environmentally Friendly",
+#     str_detect(`Positioning Claims`, regex("Artificial", ignore_case = TRUE)) ~ "Artificial",
+#     str_detect(`Positioning Claims`, regex("Additives", ignore_case = TRUE)) ~ "Additives",
+#     str_detect(`Positioning Claims`, regex("Recycling", ignore_case = TRUE)) ~ "Recycling",
+#     str_detect(`Positioning Claims`, regex("Organic", ignore_case = TRUE)) ~ "Organic",
+#     TRUE ~ "Other"
+#   ))
+gnpd_clean <- gnpd_claim %>% 
+  filter(!is.na(`Price per 100 g/ml in Euros`),
+         `Price per 100 g/ml in Euros`< quantile(`Price per 100 g/ml in Euros`, 0.99, na.rm = T))  # on retire le top 1%
 
-
-
-gnpd_clean <- gnpd_clean %>%
-  filter(!is.na(`Positioning Claims`)) %>%
-  mutate(claim_category = case_when(
-    str_detect(`Positioning Claims`, regex("Ethical", ignore_case = TRUE)) ~ "Ethical",
-    str_detect(`Positioning Claims`, regex("Functional", ignore_case = TRUE)) ~ "Functional",
-    str_detect(`Positioning Claims`, regex("Environmentally|friendly", ignore_case = TRUE)) ~ "Environmentally Friendly",
-    str_detect(`Positioning Claims`, regex("Artificial", ignore_case = TRUE)) ~ "Artificial",
-    str_detect(`Positioning Claims`, regex("Additives", ignore_case = TRUE)) ~ "Additives",
-    str_detect(`Positioning Claims`, regex("Recycling", ignore_case = TRUE)) ~ "Recycling",
-    str_detect(`Positioning Claims`, regex("Organic", ignore_case = TRUE)) ~ "Organic",
-    TRUE ~ "Other"
-  ))
-
-
-ggplot(gnpd_clean, aes(x = claim_organic, y = `Price per 100 g/ml in Euros`)) +
+ggplot(gnpd_clean, aes(x = claim_bio, y = `Price per 100 g/ml in Euros`)) +
   geom_boxplot(fill = "#264653") +
   labs(title = "Prix selon présence d'un claim 'Organic'", x = "Positioning Claim", y = "Prix pour 100g/ml")
 
@@ -658,6 +501,9 @@ library(ggplot2)
 library(stringr)
 library(forcats)
 
+
+gnpd_tea <- gnpd_brut %>% 
+  filter(`Sub-Category` == "Tea")
 # Étape 1 : Extraire tous les claims dans des lignes séparées
 gnpd_long <- gnpd_tea %>%
   filter(!is.na(`Positioning Claims`)) %>%
@@ -695,12 +541,62 @@ ggplot(gnpd_top_claims %>%
     title = "top 15 des Positioning Claims 
     les plus chers des top 30 les 
     les plus fréquents",
+    subtitle = "Concerne le thé brut uniquement",
     x = "Positioning Claim",
     y = "Prix du thé pour 100g/ml",
     caption = "Source : Mintel"
   ) +
   coord_flip() +  # optionnel : pivote pour une lecture plus facile
   theme_minimal()
+
+########################### Cas de la France ###################################
+
+# Étape 1 : Extraire tous les claims dans des lignes séparées
+gnpd_long <- gnpd_tea %>%
+  filter(!is.na(`Positioning Claims`),
+         Market == "France") %>%
+  separate_rows(`Positioning Claims`, sep = ",\\s*")  # sépare les claims par virgule
+
+unique(gnpd_long$`Positioning Claims`)
+# Étape 2 : Identifier les 10 claims les plus fréquents
+top_claims_freq <- gnpd_long %>%
+  count(`Positioning Claims`, sort = TRUE) %>%
+  slice_head(n = 15) %>%
+  pull(`Positioning Claims`)
+
+# Etape 3 : 
+
+top_claims_chers <- gnpd_long %>%
+  filter(`Positioning Claims` %in% top_claims_freq) %>%
+  group_by(`Positioning Claims`) %>%
+  summarise(median_price = median(`Price per 100 g/ml in Euros`, na.rm = TRUE)) %>%
+  arrange(desc(median_price)) %>%
+  slice_head(n = 30) %>%
+  pull(`Positioning Claims`)
+
+# Étape 4 : Filtrer uniquement les produits contenant ces claims
+gnpd_top_claims <- gnpd_long %>%
+  filter(`Positioning Claims` %in% top_claims_chers)
+
+# Étape 5 : Tracer le boxplot
+ggplot(gnpd_top_claims %>% 
+         filter(`Price per 100 g/ml in Euros`<= quantile(`Price per 100 g/ml in Euros`,0.99, na.rm = T)), 
+       aes(x = fct_reorder(`Positioning Claims`,
+                           `Price per 100 g/ml in Euros`,
+                           .fun = median), y = `Price per 100 g/ml in Euros`)) +
+  geom_boxplot(fill = "#6a4c93") +
+  labs(
+    title = "top 15 des Positioning Claims 
+    les plus chers des top 30 les 
+    les plus fréquents",
+    subtitle = "Concerne le thé brut uniquement",
+    x = "Positioning Claim",
+    y = "Prix du thé pour 100g/ml",
+    caption = "Source : Mintel"
+  ) +
+  coord_flip() +  # optionnel : pivote pour une lecture plus facile
+  theme_minimal()
+
 
 ##################### Autre methode ############################################
 
@@ -759,31 +655,40 @@ gnpd_tea <- gnpd_tea %>%
 
 gnpd_tea <- gnpd_tea %>%
   mutate(package_group_type = case_when(
-    str_detect(`Package Type`, regex("Flexible|Sachet|Pouch|Stick|Sleeve|Bag", ignore_case = TRUE)) ~ "Flexible",
-    str_detect(`Package Type`, regex("Rigid|Carton|Jar|Can|Bottle|Tub|Tube|Tottle|Case", ignore_case = TRUE)) ~ "Rigide",
-    str_detect(`Package Type`, regex("Composite|Tray|Blister|Skinpack|Aerosol", ignore_case = TRUE)) ~ "Semi-rigide / Composite",
+    str_detect(`Package Type`, regex("Can", ignore_case = TRUE)) ~ "Can",
+    str_detect(`Package Type`, regex("Carton", ignore_case = TRUE)) ~ "Carton",
+    str_detect(`Package Type`, regex("Composite", ignore_case = TRUE)) ~ "Composite",
     is.na(`Package Type`) | `Package Type` == "Miscellaneous" ~ "Non spécifié",
+    str_detect(`Package Type`, regex("flexible", ignore_case = TRUE)) ~ "flexible",
+    str_detect(`Package Type`, regex("jar", ignore_case = TRUE)) ~ "Jar",
+    str_detect(`Package Type`, regex("Tub", ignore_case = TRUE)) ~ "Tub",
     TRUE ~ "Autre"
   ))
 
-
-
 ggplot(gnpd_tea %>% 
          filter(!is.na(`Package Material`)),
-       aes(x = fct_lump(`Package Material`,10), 
-                       y = `Price per 100 g/ml in Euros`)) +
+       aes(x = fct_reorder(fct_lump(`Package Material`, 10), 
+                           `Price per 100 g/ml in Euros`, 
+                           .fun = median, 
+                           .desc = TRUE), 
+           y = `Price per 100 g/ml in Euros`)) +
   geom_boxplot(fill = "#f4a261") +
-  labs(title = "Prix du thé selon le type d'emballage", 
-       x = "Type d'emballage",
-       y = "Prix pour 100g/ml",
+  labs(title = "Prix du thé brut selon le type d'emballage", 
+       x = "Materiau d'emballage",
+       y = "Prix pour 100g/ml (en Euros)",
        caption = "Source : Mintel") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 ggplot(gnpd_tea %>% 
-         filter(!is.na(`Package Type`)), aes(x = fct_lump(`Package Type`, 10), y = `Price per 100 g/ml in Euros`)) +
+         filter(!is.na(`Package Type`)), 
+       aes(x =fct_reorder(fct_lump(`Package Type`, 10),
+                          `Price per 100 g/ml in Euros`, 
+                          .fun = median, 
+                          .desc = TRUE),
+           y = `Price per 100 g/ml in Euros`)) +
   geom_boxplot(fill = "#f4a261") +
-  labs(title = "Prix du thé selon le materiel d'emballage utilisé",
-       x = "Materiel d'emballage",
+  labs(title = "Prix du thé brut selon le materiel d'emballage utilisé",
+       x = "Type d'emballage",
        y = "Prix pour 100g/ml",
        caption = "Source : Mintel") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
@@ -794,14 +699,6 @@ unique(gnpd_tea$`Package Type`)
 
 ################################################################################
 
-# Filtrage des deux sous-catégories de thé
-tea_data <- gnpd %>%
-  filter(
-    `Sub-Category` %in% c("RTD (Iced) Tea", "Tea"),
-    !is.na(price_per_100),
-    !is.na(month),price_per_100<400
-    
-  )
 tea_data <- gnpd_tea
 tea_data$price_per_100 <- tea_data$`Price per 100 g/ml in Euros`
 # Calcul du prix moyen par mois et sous-catégorie
@@ -821,4 +718,11 @@ ggplot(evol_prix_tea, aes(x = year, y = mean_price, color = `Sub-Category`)) +
   ) +
   theme_minimal()
 
-
+#-------------------------------------------------------------------------------
+#                Analyse des compagny      
+#               ======================
+#-------------------------------------------------------------------------------
+gnpd_brut %>% 
+  filter(`Company Territory`=="France") %>% 
+  pull(Company) %>% 
+  unique()

@@ -1,0 +1,1627 @@
+---
+title: "Projet Fierthé"
+author: "KOUASSI KONAN LEGER"
+date: "`r Sys.Date()`"
+output:
+  html_document: 
+    toc: true
+    toc_float: true
+    theme: cosmo
+    highlight: tango
+    code_folding: hide
+    toc_depth: 2
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center",
+  fig.width = 10,
+  fig.height = 6,
+  out.width = "90%"
+)
+```
+
+## Plan de la Présentation
+
+1. **Introduction et Objectifs**
+2. **Statistiques Descriptives**
+3. **Préparation des Données**
+4. **Méthodologie : Régression Quantile**
+5. **Résultats par Région**
+6. **Conclusions et Recommandations**
+
+---
+
+## 1. Introduction et Objectifs
+
+### Contexte
+- Analyse du marché mondial du thé
+- Compréhension des facteurs de prix
+- Différenciation par régions géographiques
+
+### Objectifs
+- Identifier les déterminants du prix du thé
+- Analyser les variations par quantiles de prix
+- Comparer les marchés régionaux
+
+---
+
+## 2. Statistiques Descriptives
+
+### Aperçu Global des Données
+
+```{r}
+# Nettoyage de l'environnement
+rm(list = ls())
+```
+
+```{r}
+
+# Installation et chargement des packages nécessaires
+if (!require("ggrepel")) install.packages("ggrepel")
+library(readxl)
+library(tidyverse)
+library(dplyr)
+library(lubridate)
+library(wordcloud)
+library(tidytext)
+library(scales)
+library(ggplot2)
+library(gganimate)
+library(gridExtra)
+library(ggrepel) 
+library(forcats)
+
+# Importation des données
+df <- readRDS("df_final.rds")
+
+```
+
+---
+
+## 2. Statistiques Descriptives
+
+
+```{r}
+region_pie <- df %>%
+  filter(!is.na(Region_Marche)) %>%
+  count(Region_Marche) %>%
+  mutate(
+    pct = n / sum(n) * 100,
+    label = paste0(Region_Marche, " (", round(pct, 1), "%)"),
+    ymax = cumsum(pct),
+    ymin = lag(ymax, default = 0),
+    label_pos = (ymin + ymax) / 2
+  )
+
+ggplot(region_pie, aes(ymax = ymax, ymin = ymin, xmax = 1, xmin = 0, fill = Region_Marche)) +
+  geom_rect(color = "white") +
+  coord_polar(theta = "y") +
+  geom_label_repel(
+    aes(x = 1.2, y = label_pos, label = label),
+    size = 3,
+    nudge_x = 0.5,
+    show.legend = FALSE,
+    segment.color = "grey50"
+  ) +
+  labs(
+    title = "Répartition des produits par région",
+    fill = "Région"
+  ) +
+  theme_void()
+rm(region_pie)
+```
+
+
+```{r}
+# Calcul des prix moyens par année et par région de marché
+gnpd <- df 
+prix_par_annee_region_marche <- gnpd %>%
+  mutate(annee = year(`Date Published`),
+         month = floor_date(`Date Published`, "month")) %>% 
+  filter(!is.na(`Price per 100 g/ml in Euros`),
+         !is.na(annee),
+         !is.na(Region_Marche)) %>%
+  group_by(annee, Region_Marche) %>%
+  summarise(
+    n = n(),
+    prix_moyen = mean(`Price per 100 g/ml in Euros`, na.rm = TRUE),
+    prix_median = median(`Price per 100 g/ml in Euros`, na.rm = TRUE)
+  ) %>%
+  arrange(annee, Region_Marche)
+
+# Graphique de l'évolution des prix moyens par région de marché
+ggplot(prix_par_annee_region_marche, 
+       aes(x = annee, y = prix_median, color = Region_Marche, group = Region_Marche)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(
+    title = "Évolution des Prix Median par Région de Marché",
+    x = "Année",
+    y = "Prix Moyen (€/100g ou 100ml)",
+    color = "Région"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(min(prix_par_annee_region_marche$annee), 
+                                max(prix_par_annee_region_marche$annee), by = 1)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom")
+
+rm(gnpd,prix_par_annee_region_marche)
+```
+
+
+### Évolution des Lancements dans le Temps
+
+```{r evolution_time, echo=TRUE, eval=TRUE}
+# Nombre de lancements par mois
+df %>%
+  count(month) %>%
+  ggplot(aes(x = month, y = n)) +
+  geom_line(color = "steelblue", size = 1) +
+  labs(title = "Lancements de produits par mois (1998-2025)",
+       x = "Année",
+       y = "Nombre de produits lancés",
+       caption = "Source: Base Mintel GNPD") +
+  theme_minimal()
+```
+
+```{r}
+df %>%
+  count(month, Region_Marche) %>%
+  ggplot(aes(x = month, y = n, color = Region_Marche)) +
+  geom_line(size = 1) +
+  labs(title = "Lancements de produits par mois et par région (1998-2025)",
+       x = "Année",
+       y = "Nombre de produits lancés",
+       color = "Région",
+       caption = "Source: Base Mintel GNPD") +
+  theme_minimal() 
+  #scale_color_brewer(palette = "Set2")  # Pour de belles couleurs distinctes
+```
+
+```{r}
+df %>%
+  count(month, Region_Marche) %>%
+  ggplot(aes(x = month, y = n)) +
+  geom_line(color = "steelblue", size = 1) +
+  facet_wrap(~ Region_Marche, scales = "free_y") +  # ou scales = "fixed" selon votre besoin
+  labs(title = "Lancements de produits par mois et par région (1998-2025)",
+       x = "Année",
+       y = "Nombre de produits lancés",
+       caption = "Source: Base Mintel GNPD") +
+  theme_minimal()
+```
+```{r}
+df %>%
+  # Calculer les totaux par région
+  count(month, Region_Marche) %>%
+  # Calculer le total global
+  group_by(month) %>%
+  mutate(total = sum(n)) %>%
+  ggplot() +
+  # Lignes pour chaque région (en transparence)
+  geom_line(aes(x = month, y = n, group = Region_Marche), 
+            color = "gray", alpha = 0.5, size = 0.7) +
+  # Ligne pour le total global (plus visible)
+  geom_line(aes(x = month, y = total), 
+            color = "steelblue", size = 1.5) +
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y")+
+  labs(title = "Évolution globale des lancements avec détail par région",
+       subtitle = "La ligne bleue montre le total toutes régions confondues",
+       x = "Année",
+       y = "Nombre de produits lancés",
+       caption = "Source: Base Mintel GNPD") +
+  theme_minimal(base_size = 12)+
+  scale_y_continuous(limits = c(0, NA), labels = comma) +  # Échelle Y qui commence à 0
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+    plot.subtitle = element_text(size = 10, hjust = 0.5, color = "grey40"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_line(linetype = "dotted", color = "grey80"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+## Focus sur les entreprises 
+
+```{r}
+# Compter les lancements par entreprise et trier
+entreprises <- df %>%
+  count(Company, name = "Nb_Lancements") %>%
+  arrange(desc(Nb_Lancements))
+
+
+entreprises_tea <- df %>%
+  filter(`Sub-Category` == "Tea") %>% 
+  count(Company, name = "Nb_Lancements") %>%
+  arrange(desc(Nb_Lancements))
+
+# Garder les top 20 entreprises 
+top_entreprises <- entreprises %>% 
+  slice_head(n = 20)
+top_entreprises_tea <- entreprises_tea %>% 
+  slice_head(n= 20)
+
+# Filtrer celles avec un min de lancements 
+entreprises_significatives <- entreprises %>% 
+  filter(Nb_Lancements >= 50)
+```
+
+
+```{r}
+top_entreprises %>%
+  mutate(Company = fct_reorder(Company, Nb_Lancements)) %>%
+  ggplot(aes(x = Nb_Lancements, y = Company)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Top 20 des entreprises par lancements",
+       x = "Nombre de produits à base de thé lancés",
+       y = "") +
+  theme_minimal()
+
+
+## thé
+top_entreprises_tea %>%
+  mutate(Company = fct_reorder(Company, Nb_Lancements)) %>%
+  ggplot(aes(x = Nb_Lancements, y = Company)) +
+  geom_col(fill = "darkgreen") +
+  labs(title = "Top 20 entreprises de thé par lancements",
+       x = "Nombre de thé uniquement lancés",
+       y = "") +
+  theme_minimal()
+rm(top_entreprises,top_entreprises_tea,entreprises_significatives,entreprises,
+   entreprises_tea)
+```
+
+
+```{r}
+library(dplyr)
+library(lubridate)
+
+# Agrégation par mois 
+df_temporel <- df %>%
+  count(month, name = "Nb_Lancements")
+
+# Identifier les 10 entreprises les plus actives
+top_10 <- df %>%
+  count(Company, name = "Nb_Lancements") %>%
+  slice_max(Nb_Lancements, n = 3) %>%
+  pull(Company)
+
+# Filtrer et agréger
+df_top10 <- df %>%
+  filter(Company %in% top_10) %>%
+  count(month, Company, name = "Nb_Lancements")
+
+# Visualisation multi-lignes 
+ggplot(df_top10, aes(x = month, y = Nb_Lancements, color = Company)) +
+  geom_line(linewidth = 1) +
+  labs(title = "Évolution des lancements des 3 entreprises leaders",
+       x = "Date", y = "Nombre de lancements") +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set2")
+rm(df_temporel,df_top10,top_10)
+```
+Ces graphiques montrent clairement que l'entreprise "Unilever" domine clairement 
+le marché du thé dans le monde. 
+
+
+## Focus sur les dynamiques d'entreprises
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(scales)  # Pour les formats de date/échelle
+
+df %>%
+  group_by(month) %>%
+  summarise(Nb_Entreprises = n_distinct(Company)) %>%
+  ggplot(aes(x = month, y = Nb_Entreprises)) +
+  # Éléments visuels améliorés
+  geom_line(color = "#1E88E5", size = 1.2, alpha = 0.8) +  # Bleu plus professionnel
+  geom_point(color = "#FF6D00", size = 1.5) +  # Points orange pour marquer les observations
+  # Mise en forme avancée
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +  # Format des dates
+  scale_y_continuous(limits = c(0, NA), labels = comma) +  # Échelle Y qui commence à 0
+  # Labels et thème améliorés
+  labs(
+    title = "Évolution du nombre d'entreprises actives par mois",
+    subtitle = "Chaque point représente le nombre d'entreprises distinctes ayant lancé un produit",
+    x = "Période",
+    y = "Nombre d'entreprises uniques",
+    caption = paste("Base Mintel Dernière mise à jour :", format(Sys.Date(), "%d/%m/%Y"))
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+    plot.subtitle = element_text(size = 10, hjust = 0.5, color = "grey40"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_line(linetype = "dotted", color = "grey80"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+Ce graphique nous permet dire que le nombre de produit lancés est correlé avec 
+le nombre d'entreprise presente sur le marché.
+
+
+```{r}
+library(plotly)
+library(dplyr)
+
+# Préparation des données
+plot_data <- df %>%
+  group_by(month) %>%
+  summarise(Nb_Entreprises = n_distinct(Company))
+
+# Création du graphique interactif
+plot <- plot_ly(plot_data, x = ~month) %>%
+  add_lines(
+    y = ~Nb_Entreprises,
+    line = list(color = "#1E88E5", width = 3),
+    name = "Entreprises actives",
+    hoverinfo = "text",
+    text = ~paste(
+      "<b>Date:</b> ", format(month, "%B %Y"), "<br>",
+      "<b>Entreprises uniques:</b> ", Nb_Entreprises
+    )
+  ) %>%
+  add_markers(
+    y = ~Nb_Entreprises,
+    marker = list(color = "#FF6D00", size = 6),
+    name = "Observation",
+    showlegend = FALSE
+  ) %>%
+  layout(
+    title = list(
+      text = "<b>Évolution du nombre d'entreprises actives par mois</b>",
+      x = 0.05,
+      font = list(size = 18)
+    ),
+    xaxis = list(
+      title = "Période",
+      type = "date",
+      tickformat = "%Y",
+      tickangle = 45,
+      gridcolor = "#f0f0f0"
+    ),
+    yaxis = list(
+      title = "Nombre d'entreprises uniques",
+      zeroline = FALSE,
+      gridcolor = "#f0f0f0"
+    ),
+    hoverlabel = list(
+      bgcolor = "white",
+      font = list(family = "Arial", size = 12)
+    ),
+    plot_bgcolor = "white",
+    paper_bgcolor = "white",
+    margin = list(l = 50, r = 50, t = 80, b = 80),
+    annotations = list(
+      list(
+        x = 0.5,
+        y = -0.2,
+        text = paste("Dernière mise à jour :", format(Sys.Date(), "%d/%m/%Y")),
+        showarrow = FALSE,
+        xref = "paper",
+        yref = "paper",
+        font = list(size = 10, color = "grey")
+      )
+    )
+  ) %>%
+  add_annotations(
+    text = "Source: Base Mintel GNPD",
+    x = 1,
+    y = -0.25,
+    xref = "paper",
+    yref = "paper",
+    showarrow = FALSE,
+    font = list(size = 10, color = "grey")
+  )
+
+# Personnalisation de la légende
+plot <- plot %>% layout(
+  legend = list(
+    orientation = "h",
+    x = 0.5,
+    y = -0.1,
+    xanchor = "center"
+  )
+)
+
+# Affichage du graphique
+plot
+rm(plot_data,plot)
+```
+```{r}
+rm(top_entreprises,top_entreprises_tea,top_10,entreprises,entreprises_significatives,entreprises_tea,df_temporel,df_top10,prix_par_annee_region_marche, plot_data, plot)
+```
+
+```{r}
+library(dplyr)
+
+# Compter les entreprises uniques par territoire
+entreprises_par_pays <- df %>%
+  filter(!is.na(`Company Territory`),
+         !is.na(Company)) %>% 
+  distinct(`Company Territory`, Company) %>%  # Éviter les doublons
+  count(`Company Territory`, sort = TRUE) %>%
+  rename(Nombre_Entreprises = n)
+
+# Afficher les 10 premiers
+head(entreprises_par_pays, 10)
+```
+```{r}
+library(ggplot2)
+
+# Garder les top 20 pays pour une meilleure lisibilité
+top_pays <- entreprises_par_pays %>%
+  slice_max(Nombre_Entreprises, n = 20) %>%
+  mutate(`Company Territory` = fct_reorder(`Company Territory`, Nombre_Entreprises))
+
+ggplot(top_pays, aes(x = Nombre_Entreprises, y = `Company Territory`)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Top 20 des pays par nombre d'entreprises implantées",
+       x = "Nombre d'entreprises uniques",
+       y = "",
+       caption = "Source : Mintel") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold"))
+```
+```{r}
+library(plotly)
+
+plot_ly(top_pays,
+        x = ~Nombre_Entreprises,
+        y = ~reorder(`Company Territory`, Nombre_Entreprises),
+        type = 'bar',
+        orientation = 'h',
+        marker = list(color = '#1f77b4'),
+        hoverinfo = 'text',
+        text = ~paste('Pays: ', `Company Territory`, 
+                     '<br>Entreprises: ', Nombre_Entreprises)) %>%
+  layout(title = "Implantation des entreprises par pays",
+         xaxis = list(title = "Nombre d'entreprises"),
+         yaxis = list(title = ""))
+```
+
+```{r}
+rm(entreprises_par_pays,top_pays)
+```
+
+## Focus sur la France 
+
+
+
+```{r}
+library(plotly)
+library(dplyr)
+
+df %>% 
+  filter(Company == "Unilever",
+         `Company Territory` == 'France') %>% 
+  distinct(`Company address`)
+
+# 1. Filtrage des entreprises avec ≥3 adresses distinctes
+implantations_filtrees <- df %>%
+  filter(`Company Territory` == "France",
+         !is.na(`Company address`)) %>%
+  distinct(Company, `Company address`) %>%
+  count(Company, sort = TRUE) %>%
+  slice_max(n, n = 20) %>%
+  mutate(Company = fct_reorder(Company, n))
+
+head(implantations_filtrees,n=10)
+```
+Ce tableau nous présente les entreprises les plus implanté en France.
+
+
+```{r}
+# Top 20 entreprises actives sur le marché français
+top_acteurs <- df %>%
+  filter(Market == "France") %>%
+  count(Company, name = "Nb_Produits", sort = TRUE) %>%
+  slice_max(Nb_Produits, n = 20) %>%
+  mutate(Company = fct_reorder(Company, Nb_Produits))
+
+# Visualisation interactive
+plot_ly(top_acteurs,
+        x = ~Nb_Produits,
+        y = ~Company,
+        type = 'bar',
+        orientation = 'h',
+        marker = list(color = '#E15759'),
+        hoverinfo = 'text',
+        text = ~paste('Entreprise: ', Company, 
+                     '<br>Produits lancés: ', Nb_Produits)) %>%
+  layout(title = list(text = "<b>TOP 20 des acteurs du marché français</b><br>",
+                     x = 0.05),
+         xaxis = list(title = "Nombre de produits lancés"),
+         yaxis = list(title = ""),
+         margin = list(l = 150))
+rm(french_dominance,top_acteurs,implantations_filtrees)
+```
+
+
+```{r}
+# Entreprises françaises dominantes à l'international
+library(plotly)
+library(dplyr)
+
+# Préparation des données
+french_dominance <- df %>%
+  filter(`Company Territory` == "France") %>%
+  count(Market, name = "Nb_Produits") %>%
+  arrange(desc(Nb_Produits)) %>%
+  mutate(Market = ifelse(row_number() <= 10, as.character(Market), "Autre")) %>%
+  group_by(Market) %>%
+  summarize(Nb_Produits = sum(Nb_Produits)) %>%
+  arrange(desc(Nb_Produits)) %>%
+  mutate(Market = factor(Market, levels = Market))  # Préserver l'ordre
+
+# Visualisation optimisée
+plot_ly(french_dominance,
+        labels = ~Market,
+        values = ~Nb_Produits,
+        type = 'pie',
+        textinfo = 'percent',  # Afficher seulement le pourcentage dans le graphique
+        hoverinfo = 'label+text+percent',
+        hovertext = ~paste('Marché:', Market, '<br>Produits:', Nb_Produits),
+        textposition = 'inside',  # Place le texte à l'intérieur des sections
+        textfont = list(size = 12),
+        insidetextorientation = 'radial',  # Améliore la lisibilité
+        marker = list(
+          colors = RColorBrewer::brewer.pal(10, "Set2"),
+          line = list(color = '#FFFFFF', width = 1)  # Bordures blanches
+        ),
+        hole = 0.4  # Donut chart pour plus d'espace
+) %>%
+layout(
+  title = list(
+    text = "<b>Marchés cibles des entreprises implantées en  France</b>",
+    x = 0.5,  # Centrer le titre
+    y = 0.95,  # Ajuster la position verticale
+    xanchor = 'center',
+    font = list(size = 18)
+  ),
+  legend = list(
+    orientation = 'v',  # Légende verticale
+    x = 1.1,  # Décaler à droite
+    y = 0.5,
+    font = list(size = 10)
+  ),
+  margin = list(
+    l = 50,  # Marge gauche
+    r = 150,  # Marge droite augmentée pour la légende
+    b = 50,   # Marge basse
+    t = 100,  # Marge haute
+    pad = 5    # Padding interne
+  ),
+  showlegend = TRUE,
+  annotations = list(
+    list(
+      text = "Source: Mintel GNPD",
+      x = 0.5,
+      y = -0.1,
+      xref = "paper",
+      yref = "paper",
+      showarrow = FALSE,
+      font = list(size = 10, color = "grey")
+    )
+  )
+) %>%
+config(displayModeBar = T)  # Flase pour masquer la barre d'outils pour plus de lisibilité
+rm(french_dominance)
+```
+
+---
+
+## 2. Statistiques Descriptives
+
+### Top Marchés de Lancement
+
+```{r top_markets, echo=TRUE, eval=TRUE}
+# Top 10 des marchés de lancement
+p1 <- df %>%
+  filter(year < 2010) %>% 
+  count(Market, sort = TRUE) %>%
+  slice_max(n, n = 10) %>%
+  ggplot(aes(x = reorder(Market, n), y = n)) +
+  geom_col(fill = "darkgreen") +
+  coord_flip() +
+  labs(title = "Top 10 des marchés de lancement avant 2010",
+       x = "Marché",
+       y = "Nombre de lancements",
+       caption = "Source : Base Mintel")
+
+p2 <- df %>%
+  filter(year >= 2010) %>% 
+  count(Market, sort = TRUE) %>%
+  slice_max(n, n = 10) %>%
+  ggplot(aes(x = reorder(Market, n), y = n)) +
+  geom_col(fill = "#8fd175") +
+  coord_flip() +
+  labs(title = "Top 10 des marchés de lancement à partir de 2010",
+       x = "Marché",
+       y = "Nombre de lancements",
+       caption = "Source : Base Mintel")
+
+grid.arrange(p1, p2, ncol = 1)
+rm(p1,p2)
+```
+Ces deux graphiques nous montrent la dynamique du lancement de nouveau produit 
+avant et apres 2010 au niveau des top 10 de marché de lancement. Il s'agit ici du cumul des produits lancés sur ces deux periodes.
+
+---
+
+## 2. Statistiques Descriptives 
+
+### Répartition par Famille de Produits
+
+```{r product_families, echo=TRUE, eval=TRUE}
+# Répartition des sous-catégories
+p1 <- df %>%
+  count(`Sub-Category`, sort = TRUE) %>%
+  slice_max(n, n = 10) %>%
+  ggplot(aes(x = reorder(`Sub-Category`, n), y = n)) +
+  geom_col(fill = "tomato") +
+  coord_flip() +
+  labs(title = "Top 10 des sous-catégories",
+       x = "Sous-catégorie",
+       y = "Nombre de produits",
+       caption = "Source : Mintel")
+
+p2 <- df %>%
+  count(`Famille thé`, sort = TRUE) %>%
+  ggplot(aes(x = reorder(`Famille thé`, n), y = n)) +
+  geom_col(fill = "tomato") +
+  coord_flip() +
+  labs(title = "Répartition par famille de thé",
+       x = "Famille de thé",
+       y = "Nombre de produits",
+       caption = "Source : Mintel")
+
+grid.arrange(p1, p2, ncol = 1)
+rm(p1,p2)
+```
+Le premier graphique nous permet de voir sous categorie à base de thé les plus representées. Le thé brut est de loin le plus répresenté dans cette base suivie du thé glacé. Pour Mieux prendre en compte l'ensemble des sous catégories, nous les avons regroupé en 5 grandes familles. C'est qui nous montre le deuxieme graphique c'est à dire la repartition des ces familles en fonction des produits lancés de 1998 à 2025. 
+
+
+---
+
+## 2. Statistiques Descriptives
+
+### Évolution des Lancements par Famille
+
+```{r evolution_families, echo=TRUE, eval=TRUE}
+# Évolution annuelle par famille de thé
+evolution_data <- df %>%
+  count(year, `Famille thé`) %>%
+  group_by(`Famille thé`) %>%
+  mutate(
+    last_year = (year == max(year)),
+    label = if_else(last_year, `Famille thé`, NA_character_)
+  )
+
+ggplot(evolution_data, aes(x = year, y = n, color = `Famille thé`, group = `Famille thé`)) +
+  geom_line(linewidth = 1.2, alpha = 0.8) +
+  geom_point(size = 3, alpha = 0.8) +
+  geom_label_repel(
+    aes(label = label),
+    na.rm = TRUE,
+    hjust = 0,
+    direction = "y",
+    segment.color = NA,
+    size = 3.5,
+    fontface = "bold",
+    show.legend = FALSE
+  ) +
+  scale_x_continuous(breaks = seq(min(evolution_data$year), max(evolution_data$year), by = 2)) +
+  scale_color_viridis_d(option = "plasma", end = 0.9) +
+  labs(
+    title = "Évolution des lancements par famille de thé",
+    subtitle = "Analyse des tendances annuelles",
+    x = "Année",
+    y = "Nombre de produits lancés",
+    caption = "Source : Mintel GNPD"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5, color = "gray40")
+  )
+rm(evolution_data)
+```
+Ce nouveau graphique nous montre l'évolution des nouveaux produits de ces familles au cours du temps.Bien qu'avant 2011 les produits lancés semblent évoluer pareillement avec une légère du thé brute plus grande, une difference très est constaté à partir de 2011 entre le thé brut et les autres produits lancés. Partant d'environ 1000 produits lancés en 2011 à plus de 2500 thé brut lancé en 2013 et evoluer en dent de scie pour atteindre les 3000 thé brut lancé en 2020. Pendant ce temps les autres produits à base de thé bien qu'ils connaissent aussi une considerable à partir l'année 2011, ils peinent à atteindre les 1500 produits lancés par année.
+
+
+
+## Focus sur le marché français
+
+```{r product_families marché fançais, echo=TRUE, eval=TRUE}
+# Répartition des sous-catégories
+p1 <- df %>%
+  filter(Market == "France") %>% 
+  count(`Sub-Category`, sort = TRUE) %>%
+  slice_max(n, n = 10) %>%
+  ggplot(aes(x = reorder(`Sub-Category`, n), y = n)) +
+  geom_col(fill = "tomato") +
+  coord_flip() +
+  labs(title = "Top 10 des sous-catégories sur le marché français",
+       x = "Sous-catégorie",
+       y = "Nombre de produits",
+       caption = "Source : Mintel")
+
+p2 <- df %>%
+  filter(Market == "France") %>% 
+  count(`Famille thé`, sort = TRUE) %>%
+  ggplot(aes(x = reorder(`Famille thé`, n), y = n)) +
+  geom_col(fill = "tomato") +
+  coord_flip() +
+  labs(title = "Répartition par famille de thé sur le marché français",
+       x = "Famille de thé",
+       y = "Nombre de produits",
+       caption = "Source : Mintel")
+
+grid.arrange(p1, p2, ncol = 1)
+rm(p1,p2)
+################################################################################
+
+```
+
+```{r}
+
+# Évolution annuelle par famille de thé
+evolution_data <- df %>%
+  filter(Market== "France") %>% 
+  count(year, `Famille thé`) %>%
+  group_by(`Famille thé`) %>%
+  mutate(
+    last_year = (year == max(year)),
+    label = if_else(last_year, `Famille thé`, NA_character_)
+  )
+
+ggplot(evolution_data, aes(x = year, y = n, color = `Famille thé`, group = `Famille thé`)) +
+  geom_line(linewidth = 1.2, alpha = 0.8) +
+  geom_point(size = 3, alpha = 0.8) +
+  geom_label_repel(
+    aes(label = label),
+    na.rm = TRUE,
+    hjust = 0,
+    direction = "y",
+    segment.color = NA,
+    size = 3.5,
+    fontface = "bold",
+    show.legend = FALSE
+  ) +
+  scale_x_continuous(breaks = seq(min(evolution_data$year), max(evolution_data$year), by = 2)) +
+  scale_color_viridis_d(option = "D", end = 0.9) +
+  labs(
+    title = "Évolution des lancements par famille de thé sur le marché français",
+    subtitle = "Analyse des tendances annuelles",
+    x = "Année",
+    y = "Nombre de produits lancés",
+    caption = "Source : Mintel GNPD"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5, color = "gray40")
+  )
+rm(evolution_data)
+```
+
+
+
+---
+
+## 2. Statistiques Descriptives (suite)
+
+### Analyse des Prix
+
+```{r}
+summary(df$`Price per 100 g/ml in Euros`)
+summary(df %>% 
+          filter(`Price per 100 g/ml in Euros`!=0) %>% 
+          select(`Price per 100 g/ml in Euros`))
+```
+
+
+```{r price_analysis, echo=TRUE, eval=TRUE}
+# Nettoyage des données de prix (99% des produits)
+#df <- df %>% filter(`Price per 100 g/ml in Euros` != 0)
+df_clean <- df %>% 
+  filter(!is.na(`Price per 100 g/ml in Euros`),
+         `Price per 100 g/ml in Euros` < quantile(`Price per 100 g/ml in Euros`, 0.99, na.rm = TRUE))
+
+# Statistiques descriptives des prix
+price_stats <- df_clean %>% 
+  summarise(
+    min_price = min(`Price per 100 g/ml in Euros`, na.rm = TRUE),
+    mean_price = mean(`Price per 100 g/ml in Euros`, na.rm = TRUE),
+    median_price = median(`Price per 100 g/ml in Euros`, na.rm = TRUE),
+    max_price = max(`Price per 100 g/ml in Euros`, na.rm = TRUE),
+    sd_price = sd(`Price per 100 g/ml in Euros`, na.rm = TRUE),
+    n = n()
+  )
+
+print(price_stats)
+
+# Distribution des prix
+ggplot(df_clean, aes(x = `Price per 100 g/ml in Euros`)) +
+  geom_histogram(fill = "#2a9d8f", color = "white", boundary = 0, binwidth = 1) +
+  geom_vline(xintercept = median(df_clean$`Price per 100 g/ml in Euros`, na.rm = TRUE), 
+             color = "red", linetype = "dashed", size = 1) +
+  geom_vline(xintercept = mean(df_clean$`Price per 100 g/ml in Euros`, na.rm = TRUE), 
+             color = "green", linetype = "dashed", size = 1) +
+  coord_cartesian(xlim = c(0, 36)) +
+  scale_x_continuous(breaks = seq(0, 36, 4)) +
+  labs(
+    title = "Distribution des prix (99% des produits)", 
+    subtitle = "Ligne rouge = médiane, Ligne verte = moyenne",
+    x = "Prix pour 100g/ml (€)", 
+    y = "Nombre de produits",
+    caption = "Source : Base Mintel"
+  ) +
+  theme_minimal()
+
+# Le prix en fonction des sous categories en faisant un Zoom sur 0-20€ 
+ggplot(df_clean, aes(x = `Price per 100 g/ml in Euros`, fill = `Famille thé`)) +
+  geom_histogram(binwidth = 1, alpha = 0.7,boundary=0) +
+  coord_cartesian(xlim = c(0, 36))+
+  scale_x_continuous(breaks = seq(0, 36, 4)) +
+  labs(
+    caption = "Source : Base Mintel"
+  ) +
+  theme_minimal()
+rm(price_stats)
+```
+
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(scales)
+
+# 1. Créer les intervalles de prix
+df_clean <- df_clean %>%
+  mutate(
+    price_interval = cut(`Price per 100 g/ml in Euros`,
+                        breaks = c(0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, Inf),
+                        labels = c("[0-2[", "[2-4[", "[4-6[", "[6-8[", "[8-10[", 
+                                 "[10-12[", "[12-14[", "[14-16[", "[16-18[", "[18-20[", "20+"),
+                        right = FALSE)
+  )
+
+# 2. Calculer les proportions
+df_prop <- df_clean %>%
+  filter(Market=="France") %>% 
+  count(price_interval, `Famille thé`) %>%
+  group_by(price_interval) %>%
+  mutate(prop = n / sum(n)) %>%
+  ungroup()
+
+# 3. Diagramme empilé à 100% avec légende complète
+ggplot(df_prop, aes(x = price_interval, y = prop, fill = `Famille thé`)) +
+  geom_col(position = "fill") +
+  geom_text(aes(label = ifelse(prop > 0.01, percent(prop, accuracy = 1), "")), 
+            position = position_fill(vjust = 0.5), 
+            size = 3, color = "white") +
+  scale_y_continuous(labels = percent_format()) +
+  scale_fill_brewer(palette = "Set2", 
+                   guide = guide_legend(nrow = 2, byrow = TRUE)) + # Légende sur 2 lignes
+  labs(
+    title = "Proportion des familles de thé par intervalle de prix",
+    x = "Intervalle de prix (€/100g ou ml)",
+    y = "Proportion",
+    fill = "Famille de thé"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+    legend.position = "bottom",
+    legend.box = "horizontal",
+    plot.margin = margin(1, 1, 2, 1, "cm"), # Augmente les marges
+    legend.text = element_text(size = 8) # Réduit la taille du texte
+  )
+
+rm(df_prop)
+```
+
+
+
+```{r}
+library(lubridate)
+library(dplyr)
+
+
+# Creation de la variable mois
+prix_par_mois <- df_clean %>%
+  filter(!is.na(`Price per 100 g/ml in Euros`),
+         `Sub-Category` == "Tea") %>%
+  mutate(
+    last_year = (year == max(year)),
+    label = if_else(last_year, `Famille thé`, NA_character_)
+  ) %>% 
+  group_by(year) %>%
+  summarise(Prix_moyen = mean(`Price per 100 g/ml in Euros`))
+
+
+# Representation graphique
+library(ggplot2)
+
+ggplot(prix_par_mois, aes(x = year, y = Prix_moyen)) +
+  geom_line(color = "blue", size = 1) +
+  #geom_point(color = "darkblue", size = 1.5) +
+  geom_smooth(method = "loess", color = "red", se = FALSE) +
+  scale_x_continuous(breaks = seq(min(df$year), max(df$year), by = 2)) +
+  labs(title = "Évolution du prix moyen du thé par année",
+       x = "Année",
+       y = "Prix moyen (€ / 100 g/ml)",
+       caption = "Source : Base Mintel") +
+  theme_minimal()
+rm(prix_par_mois)
+```
+
+
+
+```{r}
+library(lubridate)
+library(dplyr)
+
+
+# Creation de la variable mois
+prix_par_mois <- df_clean %>%
+  filter(!is.na(Prix_corrige),
+         `Sub-Category` == "Tea") %>%
+  mutate(
+    last_year = (year == max(month)),
+    label = if_else(last_year, `Famille thé`, NA_character_)
+  ) %>% 
+  group_by(month) %>%
+  summarise(Prix_moyen = mean(Prix_corrige))
+
+
+# Representation graphique
+library(ggplot2)
+
+ggplot(prix_par_mois, aes(x = month, y = Prix_moyen)) +
+  geom_line(color = "blue", size = 1) +
+  #geom_point(color = "darkblue", size = 1.5) +
+  geom_smooth(method = "loess", color = "red", se = FALSE) +
+  #scale_x_continuous(breaks = seq(min(df$month), max(df$month), by = 12)) +
+  scale_x_date(
+    date_labels = "%b %Y",        # Format "Jan 2000"
+    date_breaks = "2 year",       # Un tick par an
+    expand = c(0.02, 0.02)        # Réduire les marges
+  ) +
+  labs(
+    title = "Évolution mensuelle du prix moyen du thé corrigé de l'inflation",
+    x = "Date",
+    y = "Prix moyen corrigé (€/100g/ml)",
+    caption = "Source : Base Mintel"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.margin = margin(1, 1, 1, 1.5, "cm")
+  )
+rm(prix_par_mois)
+```
+
+```{r}
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+
+# Préparation des données avec prix corrigé et non corrigé
+prix_par_mois <- df_clean %>%
+  filter(!is.na(`Price per 100 g/ml in Euros`),
+         `Sub-Category` == "Tea") %>%
+  group_by(year) %>%
+  summarise(
+    Prix_moyen = mean(`Price per 100 g/ml in Euros`),
+    Prix_corrige_moyen = mean(Prix_corrige, na.rm = TRUE)
+  )
+
+# Représentation graphique avec deux échelles
+ggplot(prix_par_mois) +
+  # Prix non corrigé (nominal)
+  geom_line(aes(x = year, y = Prix_moyen, color = "Prix nominal"), size = 1) +
+  geom_smooth(aes(x = year, y = Prix_moyen, color = "Prix nominal"), 
+              method = "loess", se = FALSE, linetype = "dashed") +
+  
+  # Prix corrigé (réel)
+  geom_line(aes(x = year, y = Prix_corrige_moyen, color = "Prix corrigé"), size = 1) +
+  geom_smooth(aes(x = year, y = Prix_corrige_moyen, color = "Prix corrigé"), 
+              method = "loess", se = FALSE, linetype = "dashed") +
+  
+  # Mise en forme
+  scale_x_continuous(breaks = seq(min(prix_par_mois$year), 
+                     max(prix_par_mois$year), by = 2)) +
+  scale_color_manual(
+    name = "Type de prix",
+    values = c("Prix nominal" = "blue", "Prix corrigé" = "red")
+  ) +
+  labs(
+    title = "Évolution comparée des prix nominal et corrigé du thé",
+    subtitle = "Prix moyen en €/100g/ml - Correction basée sur l'IPC de France",
+    x = "Année",
+    y = "Prix moyen (€ / 100 g/ml)",
+    caption = "Source : Base Mintel - Données corrigées de l'inflation (base 2024)"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+rm(prix_par_mois)
+```
+
+
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(lubridate) # Pour la gestion des dates
+
+# 1. Préparation des données (par famille et par mois)
+prix_par_mois_famille <- df_clean %>%
+  filter(!is.na(Prix_corrige),
+         Prix_corrige <=50,
+         `Famille thé` != "Thé prêt à boire",
+         `Famille thé` != "Aliments pour animaux contenant du thé") %>%
+  mutate(
+    last_year = (year == max(year)),
+    label = if_else(last_year, `Famille thé`, NA_character_)
+  ) %>%
+  group_by(year, `Famille thé`) %>%
+  summarise(Prix_moyen = mean(Prix_corrige), .groups = 'drop')
+
+# 2. Visualisation avec courbes par famille
+ggplot(prix_par_mois_famille, aes(x = year, y = Prix_moyen, color = `Famille thé`)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  scale_color_brewer(palette = "Set1") + # Palette de couleurs distinctes
+  scale_x_continuous(breaks = seq(min(df$year), max(df$year), by = 2)) +
+  labs(title = "Évolution du prix moyen des familles de thé",
+       subtitle = "Prix en € pour 100g/ml",
+       x = "Mois",
+       y = "Prix moyen (€ / 100 g/ml)",
+       color = "Famille de thé",
+       caption = "Source Mintel") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom",
+        plot.margin = margin(1, 1, 2, 1, "cm")) +
+  guides(color = guide_legend(nrow = 2)) # Légende sur 2 lignes si nécessaire
+rm(prix_par_mois_famille)
+```
+
+###  Focus sur la France 
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(lubridate) # Pour la gestion des dates
+
+# 1. Préparation des données (par famille et par mois)
+prix_par_mois_famille <- df_clean %>%
+  filter(!is.na(Prix_corrige),
+         Market == "France",
+         Prix_corrige <= 50,
+         `Famille thé` != "Thé prêt à boire",
+         `Famille thé` != "Aliments pour animaux contenant du thé") %>%
+  mutate(
+    last_year = (year == max(year)),
+    label = if_else(last_year, `Famille thé`, NA_character_)
+  ) %>%
+  group_by(year, `Famille thé`) %>%
+  summarise(Prix_moyen = mean(Prix_corrige), .groups = 'drop')
+
+# 2. Visualisation avec courbes par famille
+ggplot(prix_par_mois_famille, aes(x = year, y = Prix_moyen, color = `Famille thé`)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  scale_color_brewer(palette = "Set1") + # Palette de couleurs distinctes
+  scale_x_continuous(breaks = seq(min(df$year), max(df$year), by = 2)) +
+  labs(title = "Évolution du prix moyen des familles de thé",
+       subtitle = "Prix en € pour 100g/ml",
+       x = "Mois",
+       y = "Prix moyen (€ / 100 g/ml)",
+       color = "Famille de thé",
+       caption = "Source Mintel") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom",
+        plot.margin = margin(1, 1, 2, 1, "cm")) +
+  guides(color = guide_legend(nrow = 2)) # Légende sur 2 lignes si nécessaire
+rm(prix_par_mois_famille)
+```
+
+
+---
+
+## 2. Statistiques Descriptives (suite)
+
+### Claims Marketing les Plus Fréquents
+
+```{r claims_analysis, echo=TRUE, eval=TRUE}
+# Extraction des claims individuels
+claims <- df %>%
+  filter(!is.na(`Positioning Claims`)) %>%
+  unnest_tokens(claim, `Positioning Claims`, token = "regex", pattern = ",\\s*") %>%
+  count(claim, sort = TRUE)
+
+# Top 15 des claims les plus fréquents
+claims %>%
+  slice_max(n, n = 15) %>%
+  ggplot(aes(x = reorder(claim, n), y = n)) +
+  geom_col(fill = "purple") +
+  coord_flip() +
+  labs(title = "Principaux arguments marketing",
+       x = "Claim", 
+       y = "Fréquence",
+       caption = "Source : Base Mintel") +
+  theme_minimal()
+```
+
+---
+
+## 2. Statistiques Descriptives sur le thé uniquement 
+
+### Prix selon les Claims Marketing
+
+```{r price_by_claims, echo=TRUE, eval=TRUE}
+library(stringr)
+library(forcats)
+
+df_tea <- df %>% 
+  filter(`Sub-Category` == "Tea")
+
+# Étape 1 : Extraire tous les claims dans des lignes séparées
+gnpd_long <- df_tea %>%
+  filter(!is.na(`Positioning Claims`)) %>%
+  separate_rows(`Positioning Claims`, sep = ",\\s*")  # sépare les claims par virgule
+
+# Étape 2 : Identifier les 10 claims les plus fréquents
+top_claims_freq <- gnpd_long %>%
+  count(`Positioning Claims`, sort = TRUE) %>%
+  slice_head(n = 15) %>%
+  pull(`Positioning Claims`)
+
+# Etape 3 : 
+
+top_claims_chers <- gnpd_long %>%
+  filter(`Positioning Claims` %in% top_claims_freq) %>%
+  group_by(`Positioning Claims`) %>%
+  summarise(median_price = median(`Price per 100 g/ml in Euros`, na.rm = TRUE)) %>%
+  arrange(desc(median_price)) %>%
+  slice_head(n = 30) %>%
+  pull(`Positioning Claims`)
+
+# Étape 4 : Filtrer uniquement les produits contenant ces claims
+gnpd_top_claims <- gnpd_long %>%
+  filter(`Positioning Claims` %in% top_claims_chers)
+
+# Étape 5 : Tracer le boxplot
+ggplot(gnpd_top_claims %>% 
+         filter(`Price per 100 g/ml in Euros`<= quantile(`Price per 100 g/ml in Euros`,0.99, na.rm = T)), 
+       aes(x = fct_reorder(`Positioning Claims`,
+                                            `Price per 100 g/ml in Euros`,
+                                            .fun = median), y = `Price per 100 g/ml in Euros`)) +
+  geom_boxplot(fill = "#6a4c93") +
+  labs(
+    title = "top 15 des Positioning Claims 
+    les plus chers des top 30 les 
+    les plus fréquents",
+    x = "Positioning Claim",
+    y = "Prix du thé pour 100g/ml",
+    caption = "Source : Mintel"
+  ) +
+  coord_flip() +  # optionnel : pivote pour une lecture plus facile
+  theme_minimal()
+
+rm(gnpd_long,gnpd_top_claims,claims,top_claims_chers,top_claims_freq)
+```
+
+---
+
+## 2. Statistiques Descriptives (suite)
+
+### Analyse des Emballages
+
+```{r packaging_analysis, echo=TRUE, eval=TRUE}
+# Top 20 des types d'emballage
+df %>%
+  filter(!is.na(`Package Type`)) %>% 
+  count(`Package Type`, sort = TRUE) %>%
+  slice_max(n, n = 20) %>%
+  ggplot(aes(x = reorder(`Package Type`, n), y = n)) +
+  geom_col(fill = "darkred") +
+  coord_flip() +
+  labs(title = "Top 20 des types d'emballage", 
+       x = "Type d'emballage",
+       y = "Nombre de produits",
+       caption = "Source : Mintel") +
+  theme_minimal()
+
+# Top 20 des matériaux d'emballage
+df %>%
+  filter(!is.na(`Package Material`)) %>% 
+  count(`Package Material`, sort = TRUE) %>%
+  slice_max(n, n = 20) %>%
+  ggplot(aes(x = reorder(`Package Material`, n), y = n)) +
+  geom_col(fill = "red") +
+  coord_flip() +
+  labs(title = "Top 20 des matériaux d'emballage", 
+       x = "Matériau d'emballage", 
+       y = "Nombre de produits",
+       caption = "Source : Mintel") +
+  theme_minimal()
+```
+
+---
+
+## 2. Statistiques Descriptives (suite)
+
+### Prix selon le Type d'Emballage
+
+```{r price_by_packaging, echo=TRUE, eval=TRUE}
+# Prix selon le matériau d'emballage
+df_tea %>%
+  filter(!is.na(`Package Material`),
+         `Price per 100 g/ml in Euros` <= quantile(`Price per 100 g/ml in Euros`, 0.99, na.rm = TRUE)) %>%
+  ggplot(aes(x = fct_reorder(fct_lump(`Package Material`, 10), 
+                           `Price per 100 g/ml in Euros`, 
+                           .fun = median, 
+                           .desc = TRUE), 
+             y = `Price per 100 g/ml in Euros`)) +
+  geom_boxplot(fill = "#f4a261") +
+  labs(title = "Prix selon le matériau d'emballage", 
+       x = "Matériau d'emballage",
+       y = "Prix pour 100g/ml (€)",
+       caption = "Source : Mintel") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+
+# Prix selon le type d'emballage
+df_tea %>%
+  filter(!is.na(`Package Type`),
+         `Price per 100 g/ml in Euros` <= quantile(`Price per 100 g/ml in Euros`, 0.99, na.rm = TRUE)) %>%
+  ggplot(aes(x = fct_reorder(fct_lump(`Package Type`, 10), 
+                           `Price per 100 g/ml in Euros`, 
+                           .fun = median, 
+                           .desc = TRUE), 
+             y = `Price per 100 g/ml in Euros`)) +
+  geom_boxplot(fill = "#f4a261") +
+  labs(title = "Prix selon le type d'emballage",
+       x = "Type d'emballage",
+       y = "Prix pour 100g/ml (€)",
+       caption = "Source : Mintel") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+```
+
+---
+
+## 3. Préparation des Données
+
+### Création des Variables Claims
+
+```{r claims_variables, echo=TRUE, eval=TRUE}
+# 1. Santé & Bien-être
+claims_sante <- c(
+  "Functional - Energy","Functional - Other","Functional - Brain & Nervous System","Functional - Digestive","Functional - Immune System","Antioxidant","Functional - Bone Health","Functional - Skin, Nails & Hair","Functional - Cardiovascular","Probiotic","Functional - Stress & Sleep(5)
+Water Resistant","Functional - Weight & Muscle Gain","Functional - Beauty Benefits","Functional - Eye Health","Functional - Slimming","High Satiety","Prebiotic","Anti-Bacterial","Anti-Perspirant","Breath-Freshening","Cleansing","Exfoliating","Homeopathic","Long-Lasting","Odour Neutralising","Protects Against Elements","UV Protection","Waterproof","No Added Sugar","Low/Reduced Sugar","Sugar Free","Low/No/Reduced Calorie","Low/No/Reduced Carb","Low/No/Reduced Sodium","Diet/Light","Low/No/Reduced Fat","Low/No/Reduced Cholesterol","Low/No/Reduced Glycemic","Low/No/Reduced Saturated Fat","Low/No/Reduced Transfat","Low/Reduced Alcohol","Not Pasteurised","High/Added Fibre","Vitamin/Mineral Fortified","High/Added Protein",
+"Added Calcium","Stanols/Sterols","Low/No/Reduced Allergen","Low/No/Reduced Lactose","Diabetic",
+  # Product tested:
+  "Dermatologically Tested","Allergy Tested","For Balanced Skin","For Combination Skin","For Dry Skin","For Oily Skin","For Sensitive Skin","For Sensitive","Teeth/Gums","Hypoallergenic","Non-Acnegenic","Non-Comedogenic","Ophthalmologically Tested","Skin Disorders","Skin Disorders - Dermatitis","Skin Disorders - Diaper Rash","Skin Disorders - Eczema","Skin Disorders - Psoriasis","Skin Disorders - Warts",
+## beauté :
+"Anti-Ageing","All Skin Tones","Anti-Acne","Anti-Cellulite","Anti-Dandruff","Anti-Hairloss","Brightening / Illuminating","Collagen Increasing","Damaged Hair","Firming","Gradual Self-Tanning","Mattifying","Moisturising / Hydrating","Plumping","Reduces Dark Circles / Puffiness","Reduces Fine Lines / Wrinkles","Reduces Redness","Reduces the Appearance of Pores","Slimming","Toning","Whitening"
+)
+
+# 2. Naturalité & Propreté
+claims_naturel <- c(
+"Botanical/Herbal","All Natural Product","GMO Free","No Additives/Preservatives",
+"Free from Added/Artificial Preservatives","Free from Added/Artificial Colourings","Free from Added/Artificial Flavourings","Free from Added/Artificial Additives","Wholegrain","Aromatherapy","Dairy Free","Alcohol Free","Hormone Free","Caffeine Free","Palm Oil Free","Fragrance Free","Grain Free","Mineral","Oil/Petroleum Free","Oil Free","Paraben Free","pH Balanced","Silicone Free","Sulphate/Sulfate Free"
+)
+
+# 3. Ciblage & Besoins Spécifiques 
+claims_ciblage <- c(
+  # Demographie
+  "Children (5-12)", "Babies & Toddlers (0-4)", 
+  "Female", "Male", "Maternal", "Seniors (aged 55+)","teenagers (13-17)",
+  "Ethnic",
+  # COnviens pour
+  "Vegetarian", "Vegan/No Animal Ingredients", "Gluten Free","Low/No/Reduced Lactose",  "Kosher", "Halal", "Diabetic", "Diet/Light","Low/No/Reduced Allergen",
+  "Plant Based",
+  # cyblage animaux
+  "Anti-Parasite","Functional Pet - Brain & Nervous System","Functional Pet - Digestion","Functional Pet - Eyesight","Functional Pet - Heart & Cardiovascular System","Functional Pet - Immune System","Functional Pet - Joints, Bones & Muscles","Functional Pet - Other","Functional Pet - Skin & Coat","Functional Pet - Slimming","Functional Pet - Teeth & Tartar Prevention","Functional Pet - Urinary Tract","Functional Pet - Weight & Muscle Gain","Pet - Adult","Pet - Junior","Pet - Senior"
+)
+
+# 4. Éthique 
+claims_ethique <- c(
+  "ethical - human", "ethical - charity", "ethical - animal", "ethical",
+  "fair trade", "equitable", "social responsibility"
+)
+
+# 5. Bio
+claims_bio <- c(
+  "organic", "bio", "biologique", "non-GMO","GMO Free",
+  "pesticide-free"
+)
+
+# 6. Environnement
+claims_environnement <- c(
+  "ethical - environmentally friendly package", "ethical - recycling",
+  "ethical - sustainable (habitat/resources)", "ethical - toxins free",
+  "ethical - biodegradable", "carbon neutral", "biodegradable packaging",
+  "sustainable", "recyclable", "compostable", "eco-friendly", "zero waste"
+)
+
+# 7. Packaging & Convenience 
+claims_strategie <- c(
+  "convenient packaging", "time/speed", "ease of use", "interesting packaging",
+  "microwaveable", "refill/refillable", "portionability", "on-the-go",
+  "biodegradable packaging","premium", "social media", "seasonal", "limited edition","Personalised Formulation","Innovative Ingredient","Doctor Brand",
+  "event merchandising", "novel", "cobranded","economy","Wholegrain"
+)
+
+# Fonction pour détecter la présence d'un mot-clé
+detect_claim <- function(text, keywords) {
+  if (is.na(text)) return("non")
+  any(str_detect(text, fixed(keywords, ignore_case = TRUE))) %>% ifelse("oui", "non")
+}
+
+# Créer les colonnes
+df <- df %>%
+  mutate(
+    claim_sante = map_chr(`Positioning Claims`, ~ detect_claim(.x, claims_sante)),
+    claim_naturel = map_chr(`Positioning Claims`, ~ detect_claim(.x, claims_naturel)),
+    claim_ethique = map_chr(`Positioning Claims`, ~ detect_claim(.x, claims_ethique)),
+    claim_strategie = map_chr(`Positioning Claims`, ~ detect_claim(.x, claims_strategie)),
+    claim_ciblage = map_chr(`Positioning Claims`, ~ detect_claim(.x, claims_ciblage)),
+    claim_bio = map_chr(`Positioning Claims`, ~ detect_claim(.x, claims_bio)),
+    claim_environnement = map_chr(`Positioning Claims`, ~ detect_claim(.x, claims_environnement))
+  )
+
+rm(claims_ciblage,claims_ethique,claims_naturel,claims_sante,claims_strategie,
+   claims_environnement,claims_bio,detect_claim)
+```
+
+---
+
+## 3. Préparation des Données 
+### Catégorisation des Emballages et Variables Économiques
+
+```{r categories_variables, echo=TRUE, eval=TRUE}
+# Categorisation des matériaux packages
+df <- df %>%
+  mutate(material_group = case_when(
+    str_detect(`Package Material`, regex("Plastic", ignore_case = TRUE)) ~ "Plastique",
+    str_detect(`Package Material`, regex("Paper|Board", ignore_case = TRUE)) ~ "Papier / Carton",
+    str_detect(`Package Material`, regex("Glass", ignore_case = TRUE)) ~ "Verre",
+    str_detect(`Package Material`, regex("Metal|Metallised", ignore_case = TRUE)) ~ "Métal",
+    str_detect(`Package Material`, regex("Wood|Pulp|Corrugated", ignore_case = TRUE)) ~ "Bois",
+    str_detect(`Package Material`, regex("foil|lined|multi", ignore_case = TRUE)) ~ "Composites",
+    is.na(`Package Material`) | `Package Material` == "Miscellaneous" ~ "Non spécifié",
+    TRUE ~ "Autre"
+  ))
+
+df <- df %>%
+  mutate(package_group_type = case_when(
+    str_detect(`Package Type`, regex("Can", ignore_case = TRUE)) ~ "Can",
+    str_detect(`Package Type`, regex("Carton", ignore_case = TRUE)) ~ "Carton",
+    str_detect(`Package Type`, regex("Composite", ignore_case = TRUE)) ~ "Composite",
+    is.na(`Package Type`) | `Package Type` == "Miscellaneous" ~ "Non spécifié",
+    str_detect(`Package Type`, regex("flexible", ignore_case = TRUE)) ~ "flexible",
+    str_detect(`Package Type`, regex("jar", ignore_case = TRUE)) ~ "Jar",
+    str_detect(`Package Type`, regex("Tub", ignore_case = TRUE)) ~ "Tub",
+    str_detect(`Package Type`, regex("Rigid", ignore_case = TRUE)) ~ "Rigid",
+    TRUE ~ "Autre"
+  ))
+
+# convertir ces variables en facteur:
+library(dplyr)
+library(forcats)
+
+df <- df %>%
+  mutate(
+    Market = factor(Market, levels = c("China", "France", "India", "UK", "Japan",
+                                       "Germany","USA","Kenya","Finland","Lebanon")),
+    package_group_type = fct_relevel(package_group_type, "Carton"),
+    material_group = fct_relevel(material_group,"Plastique"),
+    Region_Marche = fct_relevel(Region_Marche, "Asie"),
+    `Launch Type` =fct_relevel(`Launch Type`, "New Product")
+  )
+
+# PIB par habitant
+df <- df %>%
+  mutate(
+    pib_categorie = case_when(
+      pib_par_habitant < 1041 ~ "Faible (PIB < 10.41)",
+      pib_par_habitant >= 1041 & pib_par_habitant < 2537 ~ "Intermediare inf (10.41-25.37)",
+      pib_par_habitant >= 2537 & pib_par_habitant < 4235 ~ "Intermediaire sup (25.37-42.35)",
+      pib_par_habitant >= 4235 & pib_par_habitant <= 6822 ~ "Élevé (42.35-68.22)",
+      pib_par_habitant > 6822 ~ "Très Élevé (PIB > 68.22)",
+      is.na(pib_par_habitant) ~ "Non disponible"
+    ),
+    pib_categorie = factor(pib_categorie,
+                           levels = c("Intermediaire sup (25.37-42.35)",
+                                      "Faible (PIB < 10.41)", 
+                                      "Intermediare inf (10.41-25.37)",
+                                      "Élevé (42.35-68.22)",
+                                      "Très Élevé (PIB > 68.22)", 
+                                      "Non disponible"),
+                           ordered = F)
+  )
+
+# Production de thé en tonne
+df <- df %>%
+  mutate(
+    categorie_prod = case_when(
+      production_tea_tonne <= 495.0 ~ "Très faible (≤495 t)",
+      production_tea_tonne > 495.0 & production_tea_tonne <= 8785.92 ~ "Faible (496-8,786 t)",
+      production_tea_tonne > 8785.92 & production_tea_tonne <= 87497.75 ~ "Moyenne (8,787-87,498 t)",
+      production_tea_tonne > 87497.75 & production_tea_tonne <= 1440118.1 ~ "Élevée (87,499-1,440,118 t)",
+      production_tea_tonne > 1440118.1 ~ "Très élevée (>1,440,118 t)",
+      is.na(production_tea_tonne) ~ "Pas de production"
+    ),
+    categorie_prod = factor(
+      categorie_prod,
+      levels = c("Moyenne (8,787-87,498 t)",
+                 "Très faible (≤495 t)", 
+                 "Faible (496-8,786 t)",
+                 "Élevée (87,499-1,440,118 t)", 
+                 "Très élevée (>1,440,118 t)",
+                 "Pas de production"),
+      ordered = FALSE
+    )
+  )
+
+print("Variables créées avec succès!")
+```
+### PRIVAT LABEL
+
+Les produits de marque distributeur (private label) sont ceux fabriqués par une entreprise pour être vendus sous la marque d'une autre entreprise. Le nom du distributeur est généralement clairement indiqué sur l'emballage.
+
+
+---
+
+## 4. Méthodologie : Régression Quantile
+
+### Principe de la Régression Quantile
+
+La régression quantile permet d'estimer les effets des variables explicatives sur différents quantiles de la distribution de la variable dépendante (prix), contrairement à la régression linéaire classique qui ne modélise que la moyenne.
+
+### Avantages
+- **Robustesse** : Moins sensible aux valeurs extrêmes
+- **Flexibilité** : Capture les variations à différents niveaux de prix
+- **Interprétation** : Comprendre les déterminants selon les segments de prix
+
+---
+
+## 4. Méthodologie 
+
+### Modèle Global pour le Thé
+
+```{r glimpsy, echo=TRUE, eval=TRUE}
+library(quantreg)
+df_tea <- df_tea %>% 
+  mutate(post2010 = ifelse(year >= 2010,1,0))
+# Modèle pour l'Europe
+model_tea_europe <- rq(`Price per 100 g/ml in Euros` ~year+`Launch Type` +
+                        `Private Label` + claim_sante + claim_ethique + claim_ciblage +
+                        claim_strategie + claim_naturel + package_group_type + material_group +
+                        claim_bio + claim_environnement + pib_categorie + categorie_prod,
+                      data = df_tea ,
+                      tau = 0.5)
+
+#model_tea_europe
+summary(model_tea_europe, se="ker")
+```
+
+
+```{r model_global, echo=TRUE, eval=TRUE}
+
+# Modèle de régression quantile
+model_tea <- rq(`Price per 100 g/ml in Euros` ~year +post2010+ Region_Marche + `Launch Type` +
+                 `Private Label` + claim_sante + claim_ethique + claim_ciblage +
+                 claim_strategie + claim_naturel + package_group_type + material_group +
+                 claim_bio + claim_environnement + pib_categorie + categorie_prod,
+               data = df_tea,
+               tau = c(0.25, 0.5, 0.75))
+
+# Résumé avec méthode kernel
+model_tea
+#summary(model_tea, se="ker")
+```
+
+**Note** : `se="ker"` utilise la méthode kernel, recommandée pour les grands échantillons.
+
+---
+
+## 5. Résultats par Région
+
+### Marché Européen
+
+```{r europe, echo=TRUE, eval=TRUE}
+# Modèle pour l'Europe
+model_tea_europe <- rq(`Price per 100 g/ml in Euros` ~ `Launch Type` +
+                        `Private Label` + claim_sante + claim_ethique + claim_ciblage +
+                        claim_strategie + claim_naturel + package_group_type + material_group +
+                        claim_bio + claim_environnement + pib_categorie + categorie_prod,
+                      data = df_tea %>% 
+                        filter(trimws(Region_Marche) == "Europe_Ouest"),
+                      tau = c(0.25, 0.5, 0.75,0.9))
+
+model_tea_europe
+#summary(model_tea_europe, se="ker")
+```
+
+---
+
+## 5. Résultats par Région (suite)
+
+### Marché Asiatique
+
+```{r asia, echo=TRUE, eval=TRUE}
+# Modèle pour l'Asie
+model_tea_asie <- rq(`Price per 100 g/ml in Euros` ~ post2010+ year+`Launch Type` +
+                      `Private Label` + claim_sante + claim_ethique + claim_ciblage +
+                      claim_strategie + claim_naturel + package_group_type + material_group +
+                      claim_bio + claim_environnement + pib_categorie + categorie_prod,
+                    data = df_tea %>% 
+                      filter(Region_Marche == "Asie_Orientale"),
+                    tau = c(0.25, 0.5, 0.75))
+
+model_tea_asie
+#summary(model_tea_asie, se="ker")
+```
+
+
+```{r}
+df_tea %>% 
+  filter(!is.na(`Price per 100 g/ml in Euros`),
+         `Price per 100 g/ml in Euros` < quantile(`Price per 100 g/ml in Euros`,
+                                                  0.99, na.rm = TRUE)) %>% 
+  ggplot(aes(x = claim_bio, y = `Price per 100 g/ml in Euros`)) +
+    geom_boxplot() +
+    facet_wrap(~pib_categorie)
+```
+
+
+
+## Regression mixte
+
+```{r}
+if (!require("lqmm")) install.packages("lqmm")  
+library(lqmm)
+
+
+# Exemple : quantile médian (tau = 0.5), avec effets aléatoires par pays
+# D'abord, nettoyez les noms de colonnes pour éviter les problèmes
+# names(df_tea) <- make.names(names(df_tea))
+# model_lqmm <- lqmm(
+#   fixed = Price.per.100.g.ml.in.Euros ~ post2010 + year + 
+#            Private.Label + claim_sante + claim_naturel + claim_bio + claim_environnement,
+#   random = ~ 1,
+#   group = Region_Marche,
+#   tau = 0.5,
+#   na.action = na.exclude,
+#   data = df_tea,  # Utiliser le dataframe sans NA
+#   control = lqmmControl(method = "df", LP_tol_ll = 1e-5))
+
+```
+```{r}
+#summary(model_lqmm)
+```
+```{r}
+#ranef(model_lqmm)
+```
